@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   DecodedSAT design system.
+
+   This is the Tailwind config. Tailwind v4 is CSS-first: `@theme` here replaces
+   the old `tailwind.config.js`. Every colour in the project is declared once in
+   this block and consumed by name (`bg-surface`, `text-muted`, `border-hairline`
+   …). Component code must never contain a raw hex value.
+
+   Flat fills only — no gradients. The `stripe-*` utilities below use
+   hard-stop colour bands (0%-to-stop, no interpolation), so they render as two
+   flat colours, not a blend.
+--------------------------------------------------------------------------- */
+
+@theme {
+  /* -- Core palette (CLAUDE.md) ------------------------------------------ */
+  --color-background: #f1efe8; /* warm off-white page background */
+  --color-surface: #ffffff; /* cards, raised elements */
+  --color-hairline: #d3d1c7; /* borders, dividers */
+  --color-ink: #04342c; /* body copy, headings */
+  --color-muted: #5f5e5a; /* supporting text */
+  --color-accent: #1d9e75; /* primary buttons, links, brand */
+  --color-accent-hover: #0f6e56; /* button/link hover */
+  --color-insight: #ef9f27; /* the "aha" moment — explainer videos */
+  --color-insight-dark: #ba7517; /* text on amber, badges */
+
+  /* -- Derived tints ----------------------------------------------------- */
+  /* Named so components stay hex-free; all are flat fills of the core hues. */
+  --color-insight-surface: #fff7ec; /* amber card background */
+  --color-insight-hairline: #eac58a; /* amber hairline */
+  --color-insight-chip: #fdecd3; /* amber tag background */
+  --color-accent-chip: #e4f4ec; /* green tag background */
+
+  /* The one wrong answer in the step-1 demo. */
+  --color-miss-surface: #fde7dc;
+  --color-miss-hairline: #e9b39c;
+  --color-miss-ink: #b23b12;
+
+  /* Text sitting on the dark ink panel (mission section). */
+  --color-ink-inverse: #f1efe8;
+  --color-muted-inverse: #cfe3da;
+
+  /* Placeholder thumbnail stripes. */
+  --color-stripe-amber-a: #f6e4c2;
+  --color-stripe-amber-b: #f1dbb2;
+  --color-stripe-green-a: #dcefe6;
+  --color-stripe-green-b: #d3e9de;
+
+  /* -- Layout ------------------------------------------------------------ */
+  --container-page: 73.75rem; /* 1180px — the shared content column */
+
+  /* -- Type -------------------------------------------------------------- */
+  --font-sans: var(--font-figtree), system-ui, sans-serif;
+  --font-display: var(--font-baloo), var(--font-figtree), sans-serif;
+
+  /* -- Elevation --------------------------------------------------------- */
+  --shadow-nav: 0 6px 20px rgb(4 52 44 / 0.06);
+  --shadow-insight: 0 10px 26px rgb(239 159 39 / 0.16);
+  --shadow-play: 0 3px 10px rgb(4 52 44 / 0.18);
+  --shadow-play-insight: 0 4px 12px rgb(186 117 23 / 0.35);
+}
+
+/* Two flat colour bands, no blend — hard stops on both sides of each edge. */
+@utility stripe-amber {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--color-stripe-amber-a) 0 9px,
+    var(--color-stripe-amber-b) 9px 18px
+  );
+}
+
+@utility stripe-green {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--color-stripe-green-a) 0 9px,
+    var(--color-stripe-green-b) 9px 18px
+  );
+}
+
+/* A solid right-pointing triangle, used for the video play glyphs. */
+@utility play-triangle {
+  width: 0;
+  height: 0;
+  border-top: 0.5em solid transparent;
+  border-bottom: 0.5em solid transparent;
+  border-left: 0.8125em solid currentColor;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-wrap: pretty;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  /* Anchor targets clear the sticky header. */
+  :target {
+    scroll-margin-top: 7rem;
+  }
+}

@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!-- Favicon: the mascot's head only, square-cropped from the full artwork. -->
+<svg viewBox="74 21 300 300" xmlns="http://www.w3.org/2000/svg">
+  <!-- ears -->
+  <path d="M124 138 L102 26 L200 118 Z" fill="#D85A30" stroke="#2C2C2A" stroke-width="7" stroke-linejoin="round"></path>
+  <path d="M316 138 L338 26 L240 118 Z" fill="#D85A30" stroke="#2C2C2A" stroke-width="7" stroke-linejoin="round"></path>
+  <path d="M102 26 L112 74 L146 66 Z" fill="#2C2C2A" stroke="#2C2C2A" stroke-width="6" stroke-linejoin="round"></path>
+  <path d="M338 26 L328 74 L294 66 Z" fill="#2C2C2A" stroke="#2C2C2A" stroke-width="6" stroke-linejoin="round"></path>
+  <path d="M140 120 L120 58 L182 108 Z" fill="#F1EFE8" stroke="none"></path>
+  <path d="M300 120 L320 58 L258 108 Z" fill="#F1EFE8" stroke="none"></path>
+
+  <!-- pencil -->
+  <path d="M286 128 L332 44" stroke="#2C2C2A" stroke-width="22" stroke-linecap="butt"></path>
+  <path d="M286 128 L332 44" stroke="#F4C542" stroke-width="14" stroke-linecap="butt"></path>
+  <path d="M332 44 l14 8 l-9 12 Z" fill="#E0A96D" stroke="#2C2C2A" stroke-width="4" stroke-linejoin="round"></path>
+  <circle cx="341" cy="50" r="4" fill="#2C2C2A"></circle>
+
+  <!-- head -->
+  <circle cx="220" cy="188" r="122" fill="#D85A30" stroke="#2C2C2A" stroke-width="7"></circle>
+  <path d="M220 150 C282 150 300 212 300 244 C300 290 262 314 220 314 C178 314 140 290 140 244 C140 212 158 150 220 150 Z" fill="#F1EFE8" stroke="#2C2C2A" stroke-width="6" stroke-linejoin="round"></path>
+
+  <!-- eyes -->
+  <circle cx="176" cy="176" r="31" fill="#FFFFFF" stroke="#2C2C2A" stroke-width="6"></circle>
+  <circle cx="264" cy="176" r="31" fill="#FFFFFF" stroke="#2C2C2A" stroke-width="6"></circle>
+  <circle cx="180" cy="180" r="16" fill="#2C2C2A"></circle>
+  <circle cx="268" cy="180" r="16" fill="#2C2C2A"></circle>
+  <circle cx="174" cy="173" r="5.5" fill="#FFFFFF"></circle>
+  <circle cx="262" cy="173" r="5.5" fill="#FFFFFF"></circle>
+
+  <!-- glasses -->
+  <circle cx="176" cy="176" r="40" fill="none" stroke="#1D9E75" stroke-width="7"></circle>
+  <circle cx="264" cy="176" r="40" fill="none" stroke="#1D9E75" stroke-width="7"></circle>
+  <path d="M214 170 q6 -8 12 0" fill="none" stroke="#1D9E75" stroke-width="7" stroke-linecap="round"></path>
+  <path d="M137 168 L108 150" fill="none" stroke="#1D9E75" stroke-width="6" stroke-linecap="round"></path>
+  <path d="M303 168 L332 150" fill="none" stroke="#1D9E75" stroke-width="6" stroke-linecap="round"></path>
+
+  <!-- snout -->
+  <path d="M220 226 C236 226 244 236 236 246 C230 254 210 254 204 246 C196 236 204 226 220 226 Z" fill="#2C2C2A" stroke="#2C2C2A" stroke-width="4" stroke-linejoin="round"></path>
+  <path d="M220 254 L220 268" stroke="#2C2C2A" stroke-width="5" stroke-linecap="round"></path>
+  <path d="M186 268 C198 300 242 300 254 268 C242 284 198 284 186 268 Z" fill="#2C2C2A" stroke="#2C2C2A" stroke-width="5" stroke-linejoin="round"></path>
+</svg>
