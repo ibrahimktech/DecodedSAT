@@ -24,9 +24,18 @@ import { describeError } from "@/lib/auth/describe-error";
 import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-/** Guesses from one address. Generous for a person, thin for a script. */
+/**
+ * Guesses from one address, sized for a shared NAT rather than a single
+ * person: a school computer lab or a class signing in together arrives as one
+ * IP, and at a limit of ten most of that room is locked out.
+ *
+ * This is the weaker of the two login limits by design. An attacker willing to
+ * rotate source addresses walks straight past it, which is exactly why the
+ * account-keyed limiter below exists and is kept tight. Turnstile also gates
+ * every submission before either limiter is consulted.
+ */
 const loginIpLimiter = createRateLimiter({
-  limit: 10,
+  limit: 40,
   windowMs: 10 * 60_000,
   prefix: "login-ip",
 });

@@ -30,15 +30,22 @@ import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
- * Five accounts per IP per fifteen minutes.
+ * Thirty accounts per IP per fifteen minutes.
  *
- * Low, because the honest ceiling is one: nobody signs up twice by accident,
- * and the headroom only exists for shared NATs (a school computer lab is the
- * realistic case here) and for people who mistype their address. This sits in
- * front of Supabase's own auth limits, not instead of them.
+ * The honest ceiling for one person is one — nobody signs up twice by
+ * accident. The headroom exists entirely for shared NATs, and it is sized by
+ * the realistic worst case: a teacher demoing DecodedSAT to a class, where
+ * thirty students behind a single school IP all sign up within a few minutes.
+ * At a limit of five, twenty-five of them are locked out for a quarter of an
+ * hour and the demo is over.
+ *
+ * Raising it costs little, because the per-IP window is not what stops abuse
+ * here. Turnstile gates every submission and Supabase verifies the token
+ * before an account can exist, and Supabase's own auth limits sit behind this
+ * one. This is defence in depth, not the boundary.
  */
 const signupLimiter = createRateLimiter({
-  limit: 5,
+  limit: 30,
   windowMs: 15 * 60_000,
   prefix: "signup",
 });
