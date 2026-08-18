@@ -116,7 +116,7 @@ function TargetedVideoDemo() {
       </div>
       <div className="bg-surface px-3.5 py-3">
         <p className="text-[0.90625rem] font-semibold text-ink">
-          Distribute first: fixing 3(x&minus;2) mistakes
+          Tips and tricks for Distrubiton Order mistakes.
         </p>
         <p className="mt-0.5 text-[0.8125rem] font-semibold text-insight-dark">
           3:10 &middot; targeted explainer
@@ -168,7 +168,7 @@ export function HowItWorks() {
           tone="insight"
           demo={<TargetedVideoDemo />}
         >
-          You get a 2&ndash;4 minute explainer video built for that exact mistake. Watch it, understand the topics, learn some tricks and
+          You get a 2&ndash;4 minute explainer video built for that exact mistake. Watch it, understand the topic, learn some tricks and
           the misconception is gone — for good, not just for this question.
         </StepCard>
       </div>

@@ -29,6 +29,21 @@ const VARIANTS = {
     "border-hairline text-accent hover:border-accent hover:text-accent-hover",
 } as const;
 
+/**
+ * The same classes as `CtaButton`, for the cases that cannot be a link: the
+ * `<button type="submit">` on the auth forms.
+ *
+ * Exported rather than copied so "every Get started button is identical" keeps
+ * holding — the geometry above stays the single definition. `disabled` styling
+ * lives here because only real buttons can be disabled.
+ */
+export function ctaClassName(
+  variant: keyof typeof VARIANTS = "primary",
+  className = "",
+): string {
+  return `${GEOMETRY} ${VARIANTS[variant]} disabled:cursor-not-allowed disabled:opacity-60 ${className}`;
+}
+
 export function CtaButton({
   href,
   children,

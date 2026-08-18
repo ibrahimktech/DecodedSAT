@@ -64,6 +64,7 @@ These apply from the first commit, not as a later pass. Treat every item below a
 
 ### Auth and access (once Supabase is added)
 - Row Level Security is enabled on every table from the moment it's created — never added retroactively.
+- All inputs sanitized, validated, rate-limiting added.
 - Server-side checks are the source of truth for permissions; never trust a role or permission flag read only on the client.
 
 ### General
@@ -72,15 +73,15 @@ These apply from the first commit, not as a later pass. Treat every item below a
 - Production error responses never leak stack traces, internal file paths, or raw exception messages to the client — log details server-side, return a generic safe message to the user.
 - Keep dependencies current; avoid adding third-party scripts or packages that aren't clearly necessary.
 
-## Build sequence (current phase: landing page)
-
-1. Scaffold the project — Next.js + Tailwind, deployed to Vercel, domain connected, palette set as theme colors, security conventions above in place from the start (`.env.local` + `.gitignore` configured before anything else).
-2. Hero section — headline, subheadline, single CTA button linking out to YouTube/Instagram (no email capture, no waitlist).
-3. Problem section — why generic prep tools miss the actual gap.
-4. How-it-works section — the 3-step decode loop, most visual weight on the page.
-5. Our mission section — first person, honest, plainspoken. Not a polished corporate founding story.
-6. Video library preview — grid of sample thumbnails, placeholders acceptable.
-7. Free note and footer.
-8. Polish and ship — mobile responsive check, meta tags and OG image, deploy live.
 
 Mascot: a friendly student fox character (SVG provided separately) — used small in the navbar next to the wordmark, larger and prominent in the hero.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

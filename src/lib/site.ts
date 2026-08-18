@@ -13,15 +13,17 @@ export const site = {
 } as const;
 
 /**
- * Link targets. These are in-page anchors for now because the product surfaces
- * they will eventually point at (the question bank, auth) do not exist yet.
+ * Link targets. The rest are in-page anchors because the product surfaces they
+ * will eventually point at (the question bank, the video library) do not exist
+ * yet.
  *
- * To send "Get started" out to YouTube instead, change `getStarted` to that URL
- * — every button on the page reads from this one value.
+ * `getStarted` and `signIn` are real routes now. They stay relative so they
+ * resolve against whatever origin the site is deployed on — the auth pages ship
+ * with the landing page, not with the dashboard.
  */
 export const links = {
-  getStarted: "#how",
-  signIn: "#top",
+  getStarted: "/auth/signup",
+  signIn: "/auth/login",
   library: "#library",
   /** No library page exists yet, so "Browse all" explains how videos reach you. */
   browseAll: "#how",

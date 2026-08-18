@@ -16,7 +16,11 @@
  * });
  *
  * export const POST = withApi(
- *   { schema: ContactSchema, rateLimit: { limit: 5, windowMs: 60_000 } },
+ *   {
+ *     schema: ContactSchema,
+ *     rateLimit: { limit: 5, windowMs: 60_000 },
+ *     rateLimitPrefix: "contact",
+ *   },
  *   async ({ data }) => {
  *     await sendContactEmail(data);
  *     return Response.json({ ok: true });
@@ -24,8 +28,13 @@
  * );
  * ```
  *
- * Any validator exposing Zod's `safeParse` works, so `zod` is only a
- * dependency once a route actually needs it (`npm i zod`).
+ * The `Validator` type is structural — anything exposing Zod's `safeParse`
+ * shape fits, so this wrapper never imports Zod itself.
+ *
+ * The auth Server Actions deliberately do NOT go through here: a Server Action
+ * is an RPC, not an HTTP endpoint, so it cannot return a 429 status line. They
+ * call `createRateLimiter` directly and surface the limit in their return
+ * value instead — see `src/app/auth/signup/actions.ts`.
  */
 
 import "server-only";
@@ -50,6 +59,12 @@ export type WithApiOptions<T> = {
   schema?: Validator<T>;
   /** Defaults to 30 requests per minute per IP. */
   rateLimit?: { limit: number; windowMs: number };
+  /**
+   * Rate-limit namespace. Defaults to `"api"`, which means every route sharing
+   * the default also shares one budget per IP — pass a distinct value per route
+   * so a burst on one cannot lock a caller out of another.
+   */
+  rateLimitPrefix?: string;
   /** Origins allowed to call this route. Never `*`. */
   allowedOrigins?: readonly string[];
 };
@@ -78,7 +93,11 @@ export function withApi<T = undefined>(
 ): (request: Request) => Promise<Response> {
   const { limit, windowMs } = options.rateLimit ?? DEFAULT_RATE_LIMIT;
   const allowedOrigins = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
-  const limiter = createRateLimiter({ limit, windowMs });
+  const limiter = createRateLimiter({
+    limit,
+    windowMs,
+    prefix: options.rateLimitPrefix ?? "api",
+  });
 
   return async function route(request: Request): Promise<Response> {
     // --- CORS: allowlist only, never `*`. -----------------------------------
@@ -92,7 +111,7 @@ export function withApi<T = undefined>(
 
     // --- Rate limit: by IP, before any parsing work. -------------------------
     const clientIp = getClientIp(request);
-    const rate = limiter.check(clientIp);
+    const rate = await limiter.check(clientIp);
     const rateHeaders = {
       ...corsHeaders,
       "RateLimit-Limit": String(rate.limit),

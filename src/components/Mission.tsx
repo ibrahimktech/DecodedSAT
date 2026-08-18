@@ -16,8 +16,8 @@ export function Mission() {
           </p>
           <p className="mt-4 text-lg leading-relaxed text-muted-inverse sm:text-[1.1875rem]">
             So I made the thing I wish I&rsquo;d had: something that tells you exactly what
-            went wrong and hands you the two-minute fix. That&rsquo;s it. No fluff, no
-            filler — just the gap and the way to close it.
+            went wrong and visually shows and explains the specific error + the topic. That&rsquo;s it. You don&rsquo;t waste any time getting
+            more questions wrong, you watch the video and understand it all.
           </p>
         </div>
 
