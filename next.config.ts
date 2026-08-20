@@ -14,7 +14,7 @@ import type { NextConfig } from "next";
 
 /**
  * The only third-party origin this site permits, and it is here because the
- * auth forms cannot work without it: Turnstile loads its script from this host,
+ * this host serves the embedded video player,
  * runs the challenge in an iframe served from it, and posts the result back to
  * it. That is three separate directives — miss any one and the widget fails
  * with a generic "could not load", because a CSP violation looks identical to
@@ -24,7 +24,6 @@ import type { NextConfig } from "next";
  * allowed; if another vendor is ever added it gets its own explicit entry
  * rather than a loosened directive.
  */
-const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 
 /**
  * The explainer-video library embeds YouTube's player in an iframe. Two
@@ -43,8 +42,8 @@ const YOUTUBE_THUMBNAIL_ORIGIN = "https://i.ytimg.com";
 /**
  * The Desmos graphing calculator, offered on every question. Its own entry,
  * per the one-vendor-one-entry rule above, and it needs THREE directives —
- * exactly the trap the Turnstile note warns about, since a CSP violation
- * surfaces inside the page as an indistinguishable "couldn't load":
+ * easy to under-specify, since a CSP violation surfaces inside the page as an
+ * indistinguishable "couldn't load":
  *
  * - `script-src`, for `calculator.js` itself.
  * - `font-src data:`, because the bundle carries its own maths fonts as three
@@ -75,7 +74,6 @@ const scriptSrc = [
   "'self'",
   "'unsafe-inline'",
   ...(process.env.NODE_ENV === "production" ? [] : ["'unsafe-eval'"]),
-  TURNSTILE_ORIGIN,
   DESMOS_ORIGIN,
 ].join(" ");
 
@@ -90,13 +88,12 @@ const contentSecurityPolicy = [
   // Desmos evaluates expressions in a worker created from a Blob. Nothing
   // else in the app spawns a worker, so `blob:` is the whole allowance.
   "worker-src 'self' blob:",
-  // Turnstile reports the solved challenge back to Cloudflare from the page.
-  `connect-src 'self' ${TURNSTILE_ORIGIN}`,
-  // The challenge itself renders in an iframe from this origin. `frame-src`
+  "connect-src 'self'",
+  // The video player renders in an iframe from this origin. `frame-src`
   // has no fallback of its own here beyond `default-src 'self'`, which is why
   // it has to be stated explicitly. The YouTube embed host rides in the same
   // directive for the video library.
-  `frame-src 'self' ${TURNSTILE_ORIGIN} ${YOUTUBE_EMBED_ORIGIN}`,
+  `frame-src 'self' ${YOUTUBE_EMBED_ORIGIN}`,
   // Unrelated to the above: this governs who may frame *us*, and stays closed.
   "frame-ancestors 'none'",
   "form-action 'self'",

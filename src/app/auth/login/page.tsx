@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { TURNSTILE_SITE_KEY } from "@/lib/env";
 import { LoginForm } from "./LoginForm";
 
 export const metadata: Metadata = {
@@ -42,7 +41,7 @@ export default async function LoginPage({
         </p>
       </div>
 
-      <LoginForm turnstileSiteKey={TURNSTILE_SITE_KEY} notice={notice} />
+      <LoginForm notice={notice} />
     </>
   );
 }

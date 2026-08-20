@@ -21,12 +21,8 @@ export type AuthFormState = {
   /** Safe to render. Never contains a provider message or a field name. */
   message: string;
   /**
-   * Incremented by the action on every submission.
-   *
-   * The form feeds this to the Turnstile widget as a reset signal. Turnstile
-   * tokens are single-use, so after any response the token in hand is spent —
-   * without a reset, a retry submits a burnt token and fails for a reason the
-   * person cannot see or fix.
+   * Incremented by the action on every submission. Forms key their field
+   * subtree on it so a completed attempt remounts cleanly.
    */
   attempt: number;
 };
@@ -48,20 +44,6 @@ export const GENERIC_ERROR_MESSAGE =
   "We couldn't complete that request. Please check your details and try again.";
 
 /** Shown when the caller has burnt their budget for the window. */
-/**
- * Shown when Cloudflare rejects the token — almost always `timeout-or-duplicate`,
- * meaning it expired (they sat on the form) or was already redeemed (they came
- * back to a restored page).
- *
- * Deliberately NOT the generic message. Captcha state says nothing about
- * whether an account exists, so naming it leaks nothing — and the generic
- * "check your details" is actively misleading here, because their details are
- * fine and re-typing them changes nothing. The widget resets on the same
- * attempt counter, so a second try succeeds.
- */
-export const CAPTCHA_ERROR_MESSAGE =
-  "That verification check expired. We've reset it — please try again.";
-
 export function rateLimitedMessage(retryAfterSeconds: number): string {
   const minutes = Math.ceil(retryAfterSeconds / 60);
   return minutes <= 1

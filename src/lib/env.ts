@@ -58,15 +58,6 @@ export const AUTH_CALLBACK_URL = `${SITE_URL}/auth/callback`;
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-/**
- * Turnstile's site key is public by design — it is rendered into the widget.
- * The matching secret is held by Supabase, not by this app: Supabase verifies
- * the token when it receives `captchaToken`. Turnstile tokens are single-use,
- * so verifying here as well would consume the token and make Supabase's own
- * check fail.
- */
-export const TURNSTILE_SITE_KEY =
-  process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 
 /**
  * Desmos's API key is public by design and belongs in the browser: it is a

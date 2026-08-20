@@ -12,7 +12,7 @@
  *   1. Rate limit by IP — before any parsing, so a flood costs us nothing
  *   2. Re-validate every field against the same Zod schema the form used
  *   3. Sanitise the display name
- *   4. Hand off to Supabase with the captcha token
+ *   4. Hand off to Supabase
  *   5. Return one of a small set of generic outcomes
  */
 
@@ -21,15 +21,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { APP_URL, AUTH_CALLBACK_URL } from "@/lib/env";
 import { sanitizeFullName } from "@/lib/auth/sanitize";
-import {
-  FULL_NAME_MAX,
-  FULL_NAME_MIN,
-  SignupSchema,
-  captchaTokenMissing,
-} from "@/lib/auth/schemas";
+import { FULL_NAME_MAX, FULL_NAME_MIN, SignupSchema } from "@/lib/auth/schemas";
 import {
   type AuthFormState,
-  CAPTCHA_ERROR_MESSAGE,
   GENERIC_ERROR_MESSAGE,
   rateLimitedMessage,
 } from "@/lib/auth/state";
@@ -41,7 +35,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * Sixty submissions per IP per fifteen minutes.
  *
  * Note "submissions", not "accounts": the check runs before validation, so a
- * form that fails Zod, fails captcha, or fails at Supabase still spends one.
+ * form that fails Zod or fails at Supabase still spends one.
  * That is deliberate — an attacker's malformed floods must cost them budget —
  * but it means the real consumer of this window is *retries*, not signups.
  *
@@ -51,9 +45,10 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * sign up within a few minutes, and some of them mistype and retry.
  *
  * Raising it costs little, because the per-IP window is not what stops abuse
- * here. Turnstile gates every submission and Supabase verifies the token
- * before an account can exist, and Supabase's own auth limits sit behind this
- * one. This is defence in depth, not the boundary.
+ * here. Email confirmation is: an address the sender does not control never
+ * becomes a usable account, so a scripted flood produces unconfirmed rows and
+ * nothing else. Supabase's own auth limits sit behind this one too. This is
+ * defence in depth, not the boundary.
  */
 const signupLimiter = createRateLimiter({
   limit: limitFromEnv("SIGNUP", 60),
@@ -62,35 +57,6 @@ const signupLimiter = createRateLimiter({
 });
 
 
-/**
- * TEMPORARY DIAGNOSTIC — remove once the captcha failure is understood.
- *
- * Logs a fingerprint of the submitted token, never the token. Comparing
- * fingerprints across retries is what distinguishes the two candidate causes,
- * which need opposite fixes:
- *
- *   same fingerprint each retry  -> the widget is handing back a spent token,
- *                                   so the bug is client-side in the reset.
- *   different fingerprints, all rejected -> the token is fine and Cloudflare
- *                                   is refusing it, so the site key in Vercel
- *                                   and the secret in Supabase belong to
- *                                   different widgets.
- *
- * The token is single-use and spent by the time this runs; the hash is here so
- * that stays true even in a log.
- */
-async function tokenFingerprint(token: string): Promise<string> {
-  if (!token) return "empty";
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(token),
-  );
-  const hex = Array.from(new Uint8Array(digest))
-    .slice(0, 4)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return `len=${token.length} fp=${hex}`;
-}
 
 export async function signUpAction(
   previous: AuthFormState,
@@ -120,7 +86,6 @@ export async function signUpAction(
     fullName: formData.get("fullName"),
     email: formData.get("email"),
     password: formData.get("password"),
-    captchaToken: formData.get("captchaToken"),
   });
 
   if (!parsed.success) {
@@ -129,11 +94,6 @@ export async function signUpAction(
     return failed;
   }
 
-  // A configured captcha that produced no token means the widget never
-  // completed. Checked here rather than in the schema, so that an unconfigured
-  // captcha (no site key, no widget) is not treated as a failed one.
-  if (captchaTokenMissing(parsed.data.captchaToken)) return failed;
-
   // 3. Sanitise --------------------------------------------------------------
   const fullName = sanitizeFullName(parsed.data.fullName, FULL_NAME_MAX);
   if (fullName.length < FULL_NAME_MIN) {
@@ -141,10 +101,6 @@ export async function signUpAction(
     // not survive sanitisation.
     return failed;
   }
-
-  console.log(
-    `[auth][diag] signup attempt ${attempt} captcha ${await tokenFingerprint(parsed.data.captchaToken)}`,
-  );
 
   // 4. Sign up ---------------------------------------------------------------
   // Only true when the project has email confirmation disabled; see below.
@@ -158,12 +114,6 @@ export async function signUpAction(
       password: parsed.data.password,
       options: {
         data: { full_name: fullName },
-        // Supabase holds the Turnstile secret and verifies this token itself.
-        // Tokens are single-use, so we must not also call siteverify.
-        // Empty means no captcha is configured. Send undefined rather than an
-        // empty string, so Supabase skips verification instead of trying to
-        // verify "" and failing.
-        captchaToken: parsed.data.captchaToken || undefined,
         // Never hardcoded — see `@/lib/env` for why this is SITE_URL-based.
         emailRedirectTo: AUTH_CALLBACK_URL,
       },
@@ -175,7 +125,7 @@ export async function signUpAction(
       // signup stays invisible while looking like it is being logged.
       //
       // `message` is included deliberately. It is the difference between
-      // "signup is broken" and "captcha_failed: invalid-input-response", and
+      // "signup is broken" and the actual provider error, and
       // this is a server log — the client still receives only the generic
       // string below. Withholding it here buys no security and costs an hour.
       console.error(
@@ -188,11 +138,6 @@ export async function signUpAction(
       // the same case arrives here as an error. Reporting "sent" either way
       // makes our surface behave identically regardless of that setting, so a
       // prober cannot use this action to test whether an address is registered.
-      // Recoverable, and the person can only fix it by retrying — which the
-      // widget reset (driven by `attempt`) sets them up to do.
-      if (error.code === "captcha_failed") {
-        return { status: "error", message: CAPTCHA_ERROR_MESSAGE, attempt };
-      }
 
       if (error.code === "user_already_exists") {
         return { status: "sent", message: "", attempt };

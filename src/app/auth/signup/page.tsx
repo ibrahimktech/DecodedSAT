@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { TURNSTILE_SITE_KEY } from "@/lib/env";
 import { SignupForm } from "./SignupForm";
 
 export const metadata: Metadata = {
@@ -24,7 +23,7 @@ export default function SignupPage() {
       </div>
 
       {/* Public key by design — it is rendered into the widget markup. */}
-      <SignupForm turnstileSiteKey={TURNSTILE_SITE_KEY} />
+      <SignupForm />
     </>
   );
 }

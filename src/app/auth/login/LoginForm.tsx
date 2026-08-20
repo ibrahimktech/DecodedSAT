@@ -7,9 +7,6 @@
  * check is that the email is shaped like an email. Grading the password as they
  * type would tell an attacker the rules a real password must satisfy, and would
  * block someone whose account predates a rule change from signing in at all.
- *
- * Carries a Turnstile widget because enabling captcha protection in Supabase
- * applies it to `signInWithPassword` too, not only to signup.
  */
 
 import { useActionState, useState } from "react";
@@ -17,18 +14,16 @@ import Link from "next/link";
 import { ctaClassName } from "@/components/CtaButton";
 import { AuthField } from "@/components/auth/AuthField";
 import { FormMessage } from "@/components/auth/FormMessage";
-import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import { EMAIL_MAX, LoginSchema, fieldErrors } from "@/lib/auth/schemas";
 import { initialAuthFormState } from "@/lib/auth/state";
 import { logInAction } from "./actions";
 
 type LoginFormProps = {
-  turnstileSiteKey: string;
   /** Set by `/auth/callback` when a confirmation link fails to redeem. */
   notice?: string;
 };
 
-export function LoginForm({ turnstileSiteKey, notice }: LoginFormProps) {
+export function LoginForm({ notice }: LoginFormProps) {
   const [state, formAction, pending] = useActionState(
     logInAction,
     initialAuthFormState,
@@ -36,12 +31,10 @@ export function LoginForm({ turnstileSiteKey, notice }: LoginFormProps) {
 
   const [values, setValues] = useState({ email: "", password: "" });
   const [emailTouched, setEmailTouched] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   const errors = fieldErrors(LoginSchema, {
     ...values,
     password: values.password || "x",
-    captchaToken: "x",
   });
   const emailError = emailTouched ? errors.email : undefined;
 
@@ -90,34 +83,15 @@ export function LoginForm({ turnstileSiteKey, notice }: LoginFormProps) {
           disabled={pending}
         />
 
-        <input type="hidden" name="captchaToken" value={captchaToken ?? ""} />
 
-        <TurnstileWidget
-          siteKey={turnstileSiteKey}
-          action="login"
-          onToken={setCaptchaToken}
-          resetKey={state.attempt}
-        />
-
-        {/* The token is only required when a site key is configured. With
-            `NEXT_PUBLIC_TURNSTILE_SITE_KEY` unset there is no widget to solve,
-            and gating on a token that can never arrive leaves the form
-            permanently unsubmittable — which is what "captcha is optional"
-            has to mean for it to be usable locally. Supabase still enforces
-            its own captcha setting server-side regardless of this. */}
         <button
           type="submit"
-          disabled={pending || (Boolean(turnstileSiteKey) && !captchaToken)}
+          disabled={pending}
           className={ctaClassName("primary", "w-full")}
         >
           {pending ? "Signing in…" : "Sign in"}
         </button>
 
-        {!captchaToken && turnstileSiteKey && (
-          <p className="text-center text-sm text-muted">
-            Complete the verification check to continue.
-          </p>
-        )}
       </form>
 
       <p className="text-center text-[0.9375rem] text-muted">

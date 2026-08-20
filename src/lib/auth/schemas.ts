@@ -9,7 +9,6 @@
  */
 
 import { z } from "zod";
-import { TURNSTILE_SITE_KEY } from "@/lib/env";
 
 export const FULL_NAME_MIN = 2;
 export const FULL_NAME_MAX = 100;
@@ -44,27 +43,10 @@ const passwordField = z
   .min(PASSWORD_MIN, `Use at least ${PASSWORD_MIN} characters.`)
   .max(PASSWORD_MAX, `Keep this under ${PASSWORD_MAX} characters.`);
 
-/**
- * Turnstile tokens are opaque and Cloudflare documents no fixed length, so the
- * bound is only a sanity cap to stop an unbounded string reaching Supabase.
- *
- * Deliberately NOT `.min(1)`. Whether a token is *required* depends on whether
- * a widget exists to produce one, which a schema cannot know — with
- * `NEXT_PUBLIC_TURNSTILE_SITE_KEY` unset there is no challenge to solve, the
- * form posts an empty string, and a `.min(1)` here rejects every submission
- * before it reaches Supabase. Worse, it rejects it as a plain parse failure,
- * so the generic error surfaces with nothing in the server log to explain it.
- *
- * The requirement lives in `captchaTokenMissing()` below, which the actions
- * call once they know whether a captcha is configured at all.
- */
-const captchaTokenField = z.string().max(4096);
-
 export const SignupSchema = z.object({
   fullName: fullNameField,
   email: emailField,
   password: passwordField,
-  captchaToken: captchaTokenField,
 });
 
 /**
@@ -75,26 +57,7 @@ export const SignupSchema = z.object({
 export const LoginSchema = z.object({
   email: emailField,
   password: z.string().min(1).max(PASSWORD_MAX),
-  captchaToken: captchaTokenField,
 });
-
-/**
- * Whether a submission is missing a captcha token it was supposed to carry.
- *
- * Only meaningful when a site key is configured; with no key there is no
- * widget, so an empty token is the correct and expected state rather than a
- * failure.
- *
- * This is a UX gate, not a security boundary — the same thing the widget's own
- * doc comment says. Supabase holds the Turnstile secret and verifies the token
- * itself, so a project with captcha protection enabled rejects a tokenless
- * request no matter what this function returns. That is what makes keying this
- * off an environment variable safe: unsetting the key in production does not
- * disable captcha, it just stops this app from pre-rejecting.
- */
-export function captchaTokenMissing(token: string): boolean {
-  return TURNSTILE_SITE_KEY !== "" && token.length === 0;
-}
 
 export type SignupInput = z.infer<typeof SignupSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;

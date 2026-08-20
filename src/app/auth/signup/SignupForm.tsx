@@ -18,7 +18,6 @@ import Link from "next/link";
 import { ctaClassName } from "@/components/CtaButton";
 import { AuthField } from "@/components/auth/AuthField";
 import { FormMessage } from "@/components/auth/FormMessage";
-import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import {
   EMAIL_MAX,
   FULL_NAME_MAX,
@@ -37,7 +36,7 @@ const NOTHING_TOUCHED: Touched = {
   password: false,
 };
 
-export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey: string }) {
+export function SignupForm() {
   const [state, formAction, pending] = useActionState(
     signUpAction,
     initialAuthFormState,
@@ -49,11 +48,10 @@ export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey: string }) {
     password: "",
   });
   const [touched, setTouched] = useState(NOTHING_TOUCHED);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   // Validated against the same object the server will parse, minus the token —
   // that one is gated by the disabled submit button instead.
-  const errors = fieldErrors(SignupSchema, { ...values, captchaToken: "x" });
+  const errors = fieldErrors(SignupSchema, values);
 
   const setField = (field: keyof typeof values) => (value: string) =>
     setValues((current) => ({ ...current, [field]: value }));
@@ -127,35 +125,15 @@ export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey: string }) {
           disabled={pending}
         />
 
-        {/* The widget writes to React state; this carries it into FormData. */}
-        <input type="hidden" name="captchaToken" value={captchaToken ?? ""} />
 
-        <TurnstileWidget
-          siteKey={turnstileSiteKey}
-          action="signup"
-          onToken={setCaptchaToken}
-          resetKey={state.attempt}
-        />
-
-        {/* The token is only required when a site key is configured. With
-            `NEXT_PUBLIC_TURNSTILE_SITE_KEY` unset there is no widget to solve,
-            and gating on a token that can never arrive leaves the form
-            permanently unsubmittable — which is what "captcha is optional"
-            has to mean for it to be usable locally. Supabase still enforces
-            its own captcha setting server-side regardless of this. */}
         <button
           type="submit"
-          disabled={pending || (Boolean(turnstileSiteKey) && !captchaToken)}
+          disabled={pending}
           className={ctaClassName("primary", "w-full")}
         >
           {pending ? "Creating account…" : "Create account"}
         </button>
 
-        {!captchaToken && turnstileSiteKey && (
-          <p className="text-center text-sm text-muted">
-            Complete the verification check to continue.
-          </p>
-        )}
       </form>
 
       <p className="text-center text-[0.9375rem] text-muted">

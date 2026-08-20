@@ -14,10 +14,9 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { APP_URL } from "@/lib/env";
-import { LoginSchema, captchaTokenMissing } from "@/lib/auth/schemas";
+import { LoginSchema } from "@/lib/auth/schemas";
 import {
   type AuthFormState,
-  CAPTCHA_ERROR_MESSAGE,
   GENERIC_ERROR_MESSAGE,
   rateLimitedMessage,
 } from "@/lib/auth/state";
@@ -32,7 +31,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  *
  * This is the weaker of the two login limits by design. An attacker willing to
  * rotate source addresses walks straight past it, which is exactly why the
- * account-keyed limiter below exists and is kept tight. Turnstile also gates
+ * account-keyed limiter below exists and is kept tight.
  * every submission before either limiter is consulted.
  */
 const loginIpLimiter = createRateLimiter({
@@ -94,13 +93,9 @@ export async function logInAction(
   const parsed = LoginSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
-    captchaToken: formData.get("captchaToken"),
   });
 
   if (!parsed.success) return failed;
-
-  // See the signup action: required only when a captcha is actually configured.
-  if (captchaTokenMissing(parsed.data.captchaToken)) return failed;
 
   const accountRate = await loginAccountLimiter.check(
     await accountKey(parsed.data.email),
@@ -126,10 +121,6 @@ export async function logInAction(
     const { error } = await supabase.auth.signInWithPassword({
       email: parsed.data.email,
       password: parsed.data.password,
-      // Supabase verifies this against the secret held in its dashboard.
-      // Empty means no captcha is configured; undefined skips verification
-      // rather than asking Supabase to verify an empty string.
-      options: { captchaToken: parsed.data.captchaToken || undefined },
     });
 
     if (error) {
@@ -139,12 +130,6 @@ export async function logInAction(
         `[auth] sign-in failed: ${error.code ?? "no_code"} ` +
           `(status ${error.status ?? "?"}) — ${error.message}`,
       );
-      // Unlike bad credentials, this says nothing about whether the account
-      // exists — so naming it costs no enumeration protection and saves the
-      // person from re-typing a password that was never the problem.
-      if (error.code === "captcha_failed") {
-        return { status: "error", message: CAPTCHA_ERROR_MESSAGE, attempt };
-      }
 
       return failed;
     }
