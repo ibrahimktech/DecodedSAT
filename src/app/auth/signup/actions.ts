@@ -29,6 +29,7 @@ import {
 } from "@/lib/auth/schemas";
 import {
   type AuthFormState,
+  CAPTCHA_ERROR_MESSAGE,
   GENERIC_ERROR_MESSAGE,
   rateLimitedMessage,
 } from "@/lib/auth/state";
@@ -152,6 +153,12 @@ export async function signUpAction(
       // the same case arrives here as an error. Reporting "sent" either way
       // makes our surface behave identically regardless of that setting, so a
       // prober cannot use this action to test whether an address is registered.
+      // Recoverable, and the person can only fix it by retrying — which the
+      // widget reset (driven by `attempt`) sets them up to do.
+      if (error.code === "captcha_failed") {
+        return { status: "error", message: CAPTCHA_ERROR_MESSAGE, attempt };
+      }
+
       if (error.code === "user_already_exists") {
         return { status: "sent", message: "", attempt };
       }

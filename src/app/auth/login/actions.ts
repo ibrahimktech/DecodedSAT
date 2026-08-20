@@ -17,6 +17,7 @@ import { APP_URL } from "@/lib/env";
 import { LoginSchema, captchaTokenMissing } from "@/lib/auth/schemas";
 import {
   type AuthFormState,
+  CAPTCHA_ERROR_MESSAGE,
   GENERIC_ERROR_MESSAGE,
   rateLimitedMessage,
 } from "@/lib/auth/state";
@@ -138,6 +139,13 @@ export async function logInAction(
         `[auth] sign-in failed: ${error.code ?? "no_code"} ` +
           `(status ${error.status ?? "?"}) — ${error.message}`,
       );
+      // Unlike bad credentials, this says nothing about whether the account
+      // exists — so naming it costs no enumeration protection and saves the
+      // person from re-typing a password that was never the problem.
+      if (error.code === "captcha_failed") {
+        return { status: "error", message: CAPTCHA_ERROR_MESSAGE, attempt };
+      }
+
       return failed;
     }
 

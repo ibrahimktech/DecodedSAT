@@ -159,11 +159,43 @@ export function TurnstileWidget({
   useEffect(() => {
     // Skip the initial render; there is no token to clear yet.
     if (resetKey === 0) return;
+
+    // Clear BEFORE resetting, and unconditionally.
+    //
+    // Both halves matter. `reset()` can invoke the callback with a fresh token
+    // straight away, and clearing afterwards would wipe the good token and
+    // leave the button dead. And if the script never loaded, the old token has
+    // to go anyway — keeping it means the next submit replays a token
+    // Cloudflare has already redeemed, which comes back as
+    // `timeout-or-duplicate` and looks to the person like the form is broken.
+    onTokenRef.current(null);
+
     if (widgetIdRef.current && window.turnstile) {
       window.turnstile.reset(widgetIdRef.current);
-      onTokenRef.current(null);
     }
   }, [resetKey]);
+
+  /**
+   * Re-challenge when the page is restored from the back/forward cache.
+   *
+   * A restored page brings React state back with it, including a token that
+   * was already spent on the submit the person navigated away from. The widget
+   * still shows its "Success!" tick, so nothing on screen suggests a problem —
+   * they submit, and Cloudflare rejects the replay. Discarding the token on
+   * restore is what makes the back button safe here.
+   */
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      onTokenRef.current(null);
+      if (widgetIdRef.current && window.turnstile) {
+        window.turnstile.reset(widgetIdRef.current);
+      }
+    };
+
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   if (!siteKey) {
     return (
