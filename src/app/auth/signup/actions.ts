@@ -61,6 +61,37 @@ const signupLimiter = createRateLimiter({
   prefix: "signup",
 });
 
+
+/**
+ * TEMPORARY DIAGNOSTIC — remove once the captcha failure is understood.
+ *
+ * Logs a fingerprint of the submitted token, never the token. Comparing
+ * fingerprints across retries is what distinguishes the two candidate causes,
+ * which need opposite fixes:
+ *
+ *   same fingerprint each retry  -> the widget is handing back a spent token,
+ *                                   so the bug is client-side in the reset.
+ *   different fingerprints, all rejected -> the token is fine and Cloudflare
+ *                                   is refusing it, so the site key in Vercel
+ *                                   and the secret in Supabase belong to
+ *                                   different widgets.
+ *
+ * The token is single-use and spent by the time this runs; the hash is here so
+ * that stays true even in a log.
+ */
+async function tokenFingerprint(token: string): Promise<string> {
+  if (!token) return "empty";
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(token),
+  );
+  const hex = Array.from(new Uint8Array(digest))
+    .slice(0, 4)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `len=${token.length} fp=${hex}`;
+}
+
 export async function signUpAction(
   previous: AuthFormState,
   formData: FormData,
@@ -110,6 +141,10 @@ export async function signUpAction(
     // not survive sanitisation.
     return failed;
   }
+
+  console.log(
+    `[auth][diag] signup attempt ${attempt} captcha ${await tokenFingerprint(parsed.data.captchaToken)}`,
+  );
 
   // 4. Sign up ---------------------------------------------------------------
   // Only true when the project has email confirmation disabled; see below.
