@@ -102,6 +102,13 @@ export type UserStats = {
   currentScoreEstimate: number | null;
   targetScore: number | null;
   dailyGoal: number;
+  /** Null until onboarding is finished. See `@/lib/onboarding/status`. */
+  onboardingCompletedAt: string | null;
+  /** 0 = never sat the real SAT, 1 = once, 2 = twice or more. */
+  satAttempts: number;
+  lastSatMathScore: number | null;
+  /** `YYYY-MM-DD`, or null for "not sure yet". */
+  testDate: string | null;
 };
 
 /**
@@ -117,11 +124,19 @@ export async function getUserStats(
     currentScoreEstimate: null,
     targetScore: null,
     dailyGoal: 20,
+    onboardingCompletedAt: null,
+    satAttempts: 0,
+    lastSatMathScore: null,
+    testDate: null,
   };
 
   const { data, error } = await supabase
     .from("user_stats")
-    .select("current_score_estimate, target_score, daily_goal")
+    // One string literal, not a concatenation: the client infers the row type
+    // from the literal, and `+` collapses it to `string` and loses it.
+    .select(
+      "current_score_estimate, target_score, daily_goal, onboarding_completed_at, sat_attempts, last_sat_math_score, test_date",
+    )
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -135,7 +150,37 @@ export async function getUserStats(
     currentScoreEstimate: data.current_score_estimate,
     targetScore: data.target_score,
     dailyGoal: data.daily_goal ?? 20,
+    onboardingCompletedAt: data.onboarding_completed_at,
+    satAttempts: data.sat_attempts ?? 0,
+    lastSatMathScore: data.last_sat_math_score,
+    testDate: data.test_date,
   };
+}
+
+/**
+ * The domains someone flagged as weak during onboarding, in the same display
+ * order the rest of the app uses. RLS scopes the join table to the caller.
+ */
+export async function getFocusDomains(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<Domain[]> {
+  const { data, error } = await supabase
+    .from("user_focus_domains")
+    .select("domains!inner(id, slug, name, position)")
+    .eq("user_id", userId);
+
+  if (error) {
+    logQueryError("focus_domains", error);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as Array<{
+    domains: Domain & { position: number };
+  }>)
+    .map((row) => row.domains)
+    .sort((a, b) => a.position - b.position)
+    .map(({ id, slug, name }) => ({ id, slug, name }));
 }
 
 // --- Computed metrics (SQL functions; RLS applies inside) --------------------
@@ -225,24 +270,81 @@ export async function getCurrentStreak(
   return typeof data === "number" ? data : 0;
 }
 
+/**
+ * Questions answered today, against the daily goal.
+ *
+ * Counts practice test responses alongside question bank attempts: a student
+ * who spent seventy minutes on a full test has unambiguously done their
+ * questions for the day, and a goal card that says otherwise is just wrong.
+ *
+ * UTC, matching `current_streak()` and the rest of the goal machinery. (The
+ * Progress page and the heatmap use the student's local timezone instead —
+ * see `@/lib/learn/progress`. They can disagree by one day for a late-night
+ * session; that is the accepted trade in this step.)
+ */
 export async function getTodayAttemptCount(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<number> {
   const startOfTodayUtc = new Date();
   startOfTodayUtc.setUTCHours(0, 0, 0, 0);
+  const since = startOfTodayUtc.toISOString();
 
-  const { count, error } = await supabase
-    .from("question_attempts")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .gte("attempted_at", startOfTodayUtc.toISOString());
+  const [bank, tests] = await Promise.all([
+    supabase
+      .from("question_attempts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .gte("attempted_at", since),
+    // RLS scopes responses to attempts the caller owns, so no user filter is
+    // expressible here — nor needed.
+    supabase
+      .from("practice_test_responses")
+      .select("id", { count: "exact", head: true })
+      .not("answered_at", "is", null)
+      .gte("answered_at", since),
+  ]);
 
-  if (error) {
-    logQueryError("today_attempts", error);
-    return 0;
-  }
-  return count ?? 0;
+  if (bank.error) logQueryError("today_attempts", bank.error);
+  if (tests.error) logQueryError("today_test_responses", tests.error);
+
+  return (bank.count ?? 0) + (tests.count ?? 0);
+}
+
+// --- Housekeeping -------------------------------------------------------------
+
+/**
+ * Closes any question bank sitting the caller left dangling.
+ *
+ * Call this from every page that is NOT the question player: the filter
+ * picker, Progress, the dashboard. Arriving at one of them means the set is
+ * over, so there is no risk of closing a session out from under someone who
+ * is still answering.
+ *
+ * Deliberately not called from the player's own route with `?start=1`, and
+ * deliberately not called from a layout — a layout runs on the player too.
+ */
+export async function finalizeOpenQuestionBankSessions(
+  supabase: SupabaseClient,
+): Promise<void> {
+  const { error } = await supabase.rpc("finalize_open_question_bank_sessions");
+  if (error) logQueryError("finalize_sessions", error);
+}
+
+/**
+ * Auto-submits any practice test the caller abandoned.
+ *
+ * This is the source of truth for abandonment, not `beforeunload` and not
+ * `sendBeacon` — a tab killed instantly runs no JavaScript at all, and the
+ * result still has to be right. Cheap enough to call on every page that shows
+ * test results: it reads the caller's in-progress attempts, of which there is
+ * normally zero or one.
+ */
+export async function finalizeStalePracticeTestAttempts(
+  supabase: SupabaseClient,
+): Promise<void> {
+  const { error } = await supabase.rpc("finalize_stale_practice_test_attempts");
+  if (error) logQueryError("finalize_stale_tests", error);
 }
 
 // --- Continue where you left off ---------------------------------------------
@@ -334,23 +436,118 @@ export async function getContinueTarget(
 
 // --- Explainer videos --------------------------------------------------------
 
+/**
+ * A video is filed under EITHER a subtopic (a domain video, the original and
+ * still the common case) OR a dynamic category (a general video — "Desmos
+ * tips", "Test-day strategy"). The database CHECK constraint
+ * `videos_have_a_type` guarantees at least one, so exactly one pair of these
+ * fields is populated on any given row.
+ *
+ * Categories are a video-only axis by decision: questions and practice tests
+ * keep the fixed domain/subtopic structure.
+ */
 export type VideoEntry = {
   id: string;
   title: string;
   youtubeId: string;
   description: string;
-  subtopicName: string;
-  domainId: string;
+  subtopicName: string | null;
+  subtopicSlug: string | null;
+  domainId: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
 };
+
+export type VideoCategory = {
+  id: string;
+  slug: string;
+  name: string;
+  isActive: boolean;
+};
+
+/** The category rows a student may see — active ones, in display order. */
+export async function getVideoCategories(
+  supabase: SupabaseClient,
+): Promise<VideoCategory[]> {
+  const { data, error } = await supabase
+    .from("video_categories")
+    .select("id, slug, name, is_active")
+    .eq("is_active", true)
+    .order("position")
+    .order("name");
+
+  if (error) {
+    logQueryError("video_categories", error);
+    return [];
+  }
+
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: row.id as string,
+    slug: row.slug as string,
+    name: row.name as string,
+    isActive: row.is_active as boolean,
+  }));
+}
+
+type VideoRow = {
+  id: string;
+  title: string;
+  youtube_id: string;
+  description: string;
+  subtopics: { name: string; slug: string; domain_id: string } | null;
+  video_categories: { id: string; name: string; slug: string } | null;
+};
+
+function toVideoEntry(row: VideoRow): VideoEntry {
+  return {
+    id: row.id,
+    title: row.title,
+    youtubeId: row.youtube_id,
+    description: row.description,
+    subtopicName: row.subtopics?.name ?? null,
+    subtopicSlug: row.subtopics?.slug ?? null,
+    domainId: row.subtopics?.domain_id ?? null,
+    categoryId: row.video_categories?.id ?? null,
+    categoryName: row.video_categories?.name ?? null,
+  };
+}
+
+/**
+ * Both embeds are LEFT joins (no `!inner`) so a video with only one of the two
+ * still comes back — switching them to inner is what would silently hide every
+ * category video from the library.
+ *
+ * A filter on an embedded table needs that embed to be inner, though, so the
+ * select string is chosen per filter rather than built by concatenation: the
+ * Supabase client infers the row type from a string LITERAL, and `+` collapses
+ * it to `string` and loses it.
+ */
+const VIDEO_SELECT_OPEN =
+  "id, title, youtube_id, description, subtopics(name, slug, domain_id, position), video_categories(id, name, slug)";
+const VIDEO_SELECT_BY_SUBTOPIC =
+  "id, title, youtube_id, description, subtopics!inner(name, slug, domain_id, position), video_categories(id, name, slug)";
+const VIDEO_SELECT_BY_CATEGORY =
+  "id, title, youtube_id, description, subtopics(name, slug, domain_id, position), video_categories!inner(id, name, slug)";
 
 export async function getVideos(
   supabase: SupabaseClient,
-  filters: { domainId?: string; subtopicSlug?: string } = {},
+  filters: {
+    domainId?: string;
+    subtopicSlug?: string;
+    categorySlug?: string;
+  } = {},
 ): Promise<VideoEntry[]> {
+  const bySubtopic = Boolean(filters.subtopicSlug || filters.domainId);
+  const byCategory = Boolean(filters.categorySlug) && !bySubtopic;
+
   let query = supabase
     .from("videos")
     .select(
-      "id, title, youtube_id, description, subtopics!inner(name, slug, domain_id, position)",
+      bySubtopic
+        ? VIDEO_SELECT_BY_SUBTOPIC
+        : byCategory
+          ? VIDEO_SELECT_BY_CATEGORY
+          : VIDEO_SELECT_OPEN,
     )
     // Soft-deleted videos exist only for the admin panel.
     .eq("is_active", true)
@@ -360,6 +557,8 @@ export async function getVideos(
     query = query.eq("subtopics.slug", filters.subtopicSlug);
   } else if (filters.domainId) {
     query = query.eq("subtopics.domain_id", filters.domainId);
+  } else if (filters.categorySlug) {
+    query = query.eq("video_categories.slug", filters.categorySlug);
   }
 
   const { data, error } = await query;
@@ -368,20 +567,7 @@ export async function getVideos(
     return [];
   }
 
-  return ((data ?? []) as unknown as Array<{
-    id: string;
-    title: string;
-    youtube_id: string;
-    description: string;
-    subtopics: { name: string; slug: string; domain_id: string };
-  }>).map((row) => ({
-    id: row.id,
-    title: row.title,
-    youtubeId: row.youtube_id,
-    description: row.description,
-    subtopicName: row.subtopics.name,
-    domainId: row.subtopics.domain_id,
-  }));
+  return ((data ?? []) as unknown as VideoRow[]).map(toVideoEntry);
 }
 
 /** One video by id, for the watch page. Unknown id → null → 404. */
@@ -391,9 +577,7 @@ export async function getVideo(
 ): Promise<VideoEntry | null> {
   const { data, error } = await supabase
     .from("videos")
-    .select(
-      "id, title, youtube_id, description, subtopics!inner(name, slug, domain_id)",
-    )
+    .select(VIDEO_SELECT_OPEN)
     .eq("id", videoId)
     // A soft-deleted video's watch page 404s, same as an unknown id.
     .eq("is_active", true)
@@ -405,22 +589,7 @@ export async function getVideo(
   }
   if (!data) return null;
 
-  const row = data as unknown as {
-    id: string;
-    title: string;
-    youtube_id: string;
-    description: string;
-    subtopics: { name: string; slug: string; domain_id: string };
-  };
-
-  return {
-    id: row.id,
-    title: row.title,
-    youtubeId: row.youtube_id,
-    description: row.description,
-    subtopicName: row.subtopics.name,
-    domainId: row.subtopics.domain_id,
-  };
+  return toVideoEntry(data as unknown as VideoRow);
 }
 
 // --- Question bank -----------------------------------------------------------

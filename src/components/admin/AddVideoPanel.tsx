@@ -16,6 +16,11 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { addVideoAction, lookupVideoAction } from "@/app/admin/videos/actions";
+import {
+  isPlacementComplete,
+  VideoPlacementFields,
+} from "@/components/admin/VideoPlacementFields";
+import type { AdminVideoCategory, VideoPlacement } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
 
 type LookupInfo = {
@@ -27,24 +32,24 @@ type LookupInfo = {
 export function AddVideoPanel({
   domains,
   subtopics,
+  categories,
 }: {
   domains: Domain[];
   subtopics: Subtopic[];
+  categories: AdminVideoCategory[];
 }) {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [lookup, setLookup] = useState<LookupInfo | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [domainId, setDomainId] = useState(domains[0]?.id ?? "");
-  const [subtopicId, setSubtopicId] = useState("");
+  const [placement, setPlacement] = useState<VideoPlacement>({
+    kind: "domain",
+    subtopicId: "",
+  });
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [pending, startTransition] = useTransition();
-
-  const domainSubtopics = subtopics.filter(
-    (subtopic) => subtopic.domainId === domainId,
-  );
 
   const fieldClass =
     "rounded-xl border border-hairline bg-surface px-3 py-2 text-[0.9375rem] text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent";
@@ -76,7 +81,7 @@ export function AddVideoPanel({
         youtubeId: lookup.youtubeId,
         title,
         description,
-        subtopicId,
+        ...placement,
       });
       if (result.status === "ok") {
         // Reset to step 1 for the next video; the refreshed list below shows
@@ -85,7 +90,7 @@ export function AddVideoPanel({
         setLookup(null);
         setTitle("");
         setDescription("");
-        setSubtopicId("");
+        setPlacement({ kind: "domain", subtopicId: "" });
         setSaved(true);
         router.refresh();
       } else {
@@ -184,47 +189,20 @@ export function AddVideoPanel({
               />
             </label>
 
-            <div className="flex flex-wrap gap-3">
-              <label className="flex flex-col gap-1 text-sm font-medium text-muted">
-                Domain
-                <select
-                  value={domainId}
-                  onChange={(event) => {
-                    setDomainId(event.target.value);
-                    setSubtopicId("");
-                  }}
-                  className={fieldClass}
-                >
-                  {domains.map((domain) => (
-                    <option key={domain.id} value={domain.id}>
-                      {domain.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="flex flex-col gap-1 text-sm font-medium text-muted">
-                Subtopic
-                <select
-                  value={subtopicId}
-                  onChange={(event) => setSubtopicId(event.target.value)}
-                  className={fieldClass}
-                >
-                  <option value="">Choose a subtopic…</option>
-                  {domainSubtopics.map((subtopic) => (
-                    <option key={subtopic.id} value={subtopic.id}>
-                      {subtopic.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <VideoPlacementFields
+              idPrefix="add"
+              placement={placement}
+              onChange={setPlacement}
+              domains={domains}
+              subtopics={subtopics}
+              categories={categories}
+            />
 
             <div>
               <button
                 type="button"
                 onClick={save}
-                disabled={pending || title.trim() === "" || subtopicId === ""}
+                disabled={pending || title.trim() === "" || !isPlacementComplete(placement)}
                 className="rounded-xl bg-accent px-5 py-2 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pending ? "Saving…" : "Save video"}

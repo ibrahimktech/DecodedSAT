@@ -18,9 +18,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { describeError } from "@/lib/auth/describe-error";
 import type { Difficulty } from "@/lib/learn/types";
 import type {
+  AdminPracticeTest,
   AdminQuestion,
   AdminUserRow,
   AdminVideo,
+  AdminVideoCategory,
   QuestionSetOption,
 } from "./types";
 import type { AdminQuestionFilters, AdminVideoFilters } from "./schemas";
@@ -48,14 +50,14 @@ function escapeLikePattern(value: string): string {
 export type AdminOverviewCounts = {
   activeQuestions: number;
   activeVideos: number;
-  questionSets: number;
+  activePracticeTests: number;
   totalUsers: number;
 };
 
 export async function getAdminOverviewCounts(
   supabase: SupabaseClient,
 ): Promise<AdminOverviewCounts> {
-  const [questions, videos, sets, users] = await Promise.all([
+  const [questions, videos, tests, users] = await Promise.all([
     supabase
       .from("questions")
       .select("id", { count: "exact", head: true })
@@ -64,19 +66,22 @@ export async function getAdminOverviewCounts(
       .from("videos")
       .select("id", { count: "exact", head: true })
       .eq("is_active", true),
-    supabase.from("question_sets").select("id", { count: "exact", head: true }),
+    supabase
+      .from("practice_tests")
+      .select("id", { count: "exact", head: true })
+      .eq("is_active", true),
     supabase.from("profiles").select("id", { count: "exact", head: true }),
   ]);
 
   if (questions.error) logQueryError("count_questions", questions.error);
   if (videos.error) logQueryError("count_videos", videos.error);
-  if (sets.error) logQueryError("count_sets", sets.error);
+  if (tests.error) logQueryError("count_tests", tests.error);
   if (users.error) logQueryError("count_users", users.error);
 
   return {
     activeQuestions: questions.count ?? 0,
     activeVideos: videos.count ?? 0,
-    questionSets: sets.count ?? 0,
+    activePracticeTests: tests.count ?? 0,
     totalUsers: users.count ?? 0,
   };
 }
@@ -177,15 +182,26 @@ export async function listAdminQuestions(
 
 // --- Videos ----------------------------------------------------------------------
 
+/**
+ * Both embeds are LEFT joins so a category video is not dropped from the
+ * list. Filtering on an embed needs it to be inner, so the select string is
+ * picked per filter rather than concatenated — the client infers the row type
+ * from a string literal and `+` would collapse it to `string`.
+ */
+const ADMIN_VIDEO_SELECT_OPEN =
+  "id, title, youtube_id, description, is_active, subtopics(id, name, domain_id), video_categories(id, name)";
+const ADMIN_VIDEO_SELECT_BY_SUBTOPIC =
+  "id, title, youtube_id, description, is_active, subtopics!inner(id, name, domain_id), video_categories(id, name)";
+
 export async function listAdminVideos(
   supabase: SupabaseClient,
   filters: AdminVideoFilters,
 ): Promise<AdminVideo[]> {
+  const bySubtopic = Boolean(filters.subtopic || filters.domain);
+
   let query = supabase
     .from("videos")
-    .select(
-      "id, title, youtube_id, description, is_active, subtopics!inner(id, name, domain_id)",
-    )
+    .select(bySubtopic ? ADMIN_VIDEO_SELECT_BY_SUBTOPIC : ADMIN_VIDEO_SELECT_OPEN)
     .order("title");
 
   const status = filters.status ?? "active";
@@ -195,6 +211,9 @@ export async function listAdminVideos(
     query = query.eq("subtopic_id", filters.subtopic);
   } else if (filters.domain) {
     query = query.eq("subtopics.domain_id", filters.domain);
+  } else if (filters.category) {
+    // A plain column filter, not an embed filter, so the left joins stay left.
+    query = query.eq("video_category_id", filters.category);
   }
 
   const { data, error } = await query;
@@ -209,17 +228,102 @@ export async function listAdminVideos(
     youtube_id: string;
     description: string;
     is_active: boolean;
-    subtopics: { id: string; name: string; domain_id: string };
+    subtopics: { id: string; name: string; domain_id: string } | null;
+    video_categories: { id: string; name: string } | null;
   }>).map((row) => ({
     id: row.id,
     title: row.title,
     youtubeId: row.youtube_id,
     description: row.description,
     isActive: row.is_active,
-    subtopicId: row.subtopics.id,
-    subtopicName: row.subtopics.name,
-    domainId: row.subtopics.domain_id,
+    subtopicId: row.subtopics?.id ?? null,
+    subtopicName: row.subtopics?.name ?? null,
+    domainId: row.subtopics?.domain_id ?? null,
+    categoryId: row.video_categories?.id ?? null,
+    categoryName: row.video_categories?.name ?? null,
   }));
+}
+
+// --- Video categories ------------------------------------------------------------
+
+/**
+ * Every category, active and soft-deleted alike — the admin list offers
+ * restore, so it cannot filter inactive ones out. The `video_categories`
+ * SELECT policy releases inactive rows only to admins.
+ */
+export async function listAdminVideoCategories(
+  supabase: SupabaseClient,
+): Promise<AdminVideoCategory[]> {
+  const { data, error } = await supabase
+    .from("video_categories")
+    .select("id, name, slug, is_active, videos(count)")
+    .order("position")
+    .order("name");
+
+  if (error) {
+    logQueryError("admin_video_categories", error);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    name: string;
+    slug: string;
+    is_active: boolean;
+    videos: Array<{ count: number }>;
+  }>).map((row) => ({
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    isActive: row.is_active,
+    videoCount: row.videos?.[0]?.count ?? 0,
+  }));
+}
+
+// --- Practice tests ---------------------------------------------------------------
+
+/**
+ * Reads through `admin_practice_tests`, whose own `is_admin()` filter returns
+ * zero rows to anyone else — the same construct as `admin_questions`. The
+ * per-module counts come from the view so the list can show at a glance which
+ * tests are still missing their questions.
+ */
+export async function listAdminPracticeTests(
+  supabase: SupabaseClient,
+): Promise<AdminPracticeTest[]> {
+  const { data, error } = await supabase
+    .from("admin_practice_tests")
+    .select(
+      "id, title, description, difficulty, test_type, module_count, is_active, created_at, module1_count, module2_count, attempt_count",
+    )
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    logQueryError("admin_practice_tests", error);
+    return [];
+  }
+
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: row.id as string,
+    title: row.title as string,
+    description: (row.description as string | null) ?? null,
+    difficulty: row.difficulty as Difficulty,
+    testType: row.test_type as "full" | "half",
+    moduleCount: Number(row.module_count ?? 1),
+    isActive: row.is_active as boolean,
+    createdAt: row.created_at as string,
+    module1Count: Number(row.module1_count ?? 0),
+    module2Count: Number(row.module2_count ?? 0),
+    attemptCount: Number(row.attempt_count ?? 0),
+  }));
+}
+
+export async function getAdminPracticeTest(
+  supabase: SupabaseClient,
+  testId: string,
+): Promise<AdminPracticeTest | null> {
+  const tests = await listAdminPracticeTests(supabase);
+  return tests.find((test) => test.id === testId) ?? null;
 }
 
 // --- Users -----------------------------------------------------------------------

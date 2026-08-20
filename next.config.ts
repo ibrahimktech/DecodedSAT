@@ -41,6 +41,28 @@ const YOUTUBE_EMBED_ORIGIN = "https://www.youtube-nocookie.com";
 const YOUTUBE_THUMBNAIL_ORIGIN = "https://i.ytimg.com";
 
 /**
+ * The Desmos graphing calculator, offered on every question. Its own entry,
+ * per the one-vendor-one-entry rule above, and it needs THREE directives —
+ * exactly the trap the Turnstile note warns about, since a CSP violation
+ * surfaces inside the page as an indistinguishable "couldn't load":
+ *
+ * - `script-src`, for `calculator.js` itself.
+ * - `font-src data:`, because the bundle carries its own maths fonts as three
+ *   `@font-face` rules with `url(data:font/...)`. Without it the script runs
+ *   and the calculator renders with no glyphs.
+ * - `worker-src blob:`, because it runs evaluation off the main thread in a
+ *   worker built from a Blob:
+ *       URL.createObjectURL(new Blob([__dcg_worker_source__], …))
+ *   `worker-src` falls back to `child-src` and then to `default-src 'self'`,
+ *   which does not cover `blob:` — so this must be stated outright.
+ *
+ * `img-src` deliberately does NOT gain `blob:`. That would only be needed for
+ * Desmos's image-upload feature, which is switched off in `<CalculatorPanel />`
+ * (`images: false`) because the real digital SAT does not offer it either.
+ */
+const DESMOS_ORIGIN = "https://www.desmos.com";
+
+/**
  * React's development build calls `eval()` to reconstruct callstacks across
  * environments, and logs a warning on every page load when the CSP forbids it.
  *
@@ -54,6 +76,7 @@ const scriptSrc = [
   "'unsafe-inline'",
   ...(process.env.NODE_ENV === "production" ? [] : ["'unsafe-eval'"]),
   TURNSTILE_ORIGIN,
+  DESMOS_ORIGIN,
 ].join(" ");
 
 const contentSecurityPolicy = [
@@ -61,7 +84,12 @@ const contentSecurityPolicy = [
   `script-src ${scriptSrc}`,
   "style-src 'self' 'unsafe-inline'",
   `img-src 'self' data: ${YOUTUBE_THUMBNAIL_ORIGIN}`,
-  "font-src 'self'",
+  // `data:` is for Desmos's embedded maths fonts, not for remote loading —
+  // no third-party font origin is permitted.
+  "font-src 'self' data:",
+  // Desmos evaluates expressions in a worker created from a Blob. Nothing
+  // else in the app spawns a worker, so `blob:` is the whole allowance.
+  "worker-src 'self' blob:",
   // Turnstile reports the solved challenge back to Cloudflare from the page.
   `connect-src 'self' ${TURNSTILE_ORIGIN}`,
   // The challenge itself renders in an iframe from this origin. `frame-src`

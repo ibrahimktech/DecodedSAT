@@ -16,6 +16,7 @@ import {
   setQuestionActiveAction,
   updateQuestionAction,
 } from "@/app/admin/questions/actions";
+import { MathText } from "@/components/app/MathText";
 import type { AdminQuestion } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
 import {
@@ -92,9 +93,14 @@ function QuestionRow({
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="whitespace-pre-wrap text-[0.9375rem] font-medium leading-relaxed text-ink">
-            {question.prompt}
-          </p>
+          {/* Typeset, so the admin sees what the student will see. The edit
+              form below deliberately does NOT — a textarea has to show the raw
+              `$...$` source, or the maths becomes uneditable. */}
+          <MathText
+            as="p"
+            text={question.prompt}
+            className="whitespace-pre-wrap text-[0.9375rem] font-medium leading-relaxed text-ink"
+          />
           <p className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
             <span className="rounded-lg bg-accent-chip px-2 py-0.5 text-accent">
               {question.domainName} · {question.subtopicName}

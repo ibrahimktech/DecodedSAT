@@ -31,10 +31,10 @@ export default async function AdminOverviewPage() {
       cta: "Manage videos",
     },
     {
-      label: "Question sets",
-      value: counts.questionSets,
-      href: "/admin/questions",
-      cta: "Browse by set",
+      label: "Practice tests",
+      value: counts.activePracticeTests,
+      href: "/admin/practice-tests",
+      cta: "Manage tests",
     },
     {
       label: "Registered users",

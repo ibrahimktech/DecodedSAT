@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AddVideoPanel } from "@/components/admin/AddVideoPanel";
 import { VideoAdminList } from "@/components/admin/VideoAdminList";
-import { listAdminVideos } from "@/lib/admin/data";
+import { listAdminVideoCategories, listAdminVideos } from "@/lib/admin/data";
 import { AdminVideoFiltersSchema } from "@/lib/admin/schemas";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getDomains, getSubtopics } from "@/lib/learn/data";
@@ -30,12 +30,14 @@ export default async function AdminVideosPage({
   const filters = AdminVideoFiltersSchema.parse({
     domain: single("domain"),
     subtopic: single("subtopic"),
+    category: single("category"),
     status: single("status"),
   });
 
-  const [domains, subtopics, videos] = await Promise.all([
+  const [domains, subtopics, categories, videos] = await Promise.all([
     getDomains(supabase),
     getSubtopics(supabase),
+    listAdminVideoCategories(supabase),
     listAdminVideos(supabase, filters),
   ]);
 
@@ -47,15 +49,27 @@ export default async function AdminVideosPage({
         <h1 className="font-display text-3xl font-extrabold text-ink">
           Explainer videos
         </h1>
-        <Link
-          href="/admin"
-          className="text-sm font-semibold text-accent hover:text-accent-hover"
-        >
-          ← Overview
-        </Link>
+        <div className="flex gap-4">
+          <Link
+            href="/admin/video-categories"
+            className="text-sm font-semibold text-accent hover:text-accent-hover"
+          >
+            Categories
+          </Link>
+          <Link
+            href="/admin"
+            className="text-sm font-semibold text-accent hover:text-accent-hover"
+          >
+            ← Overview
+          </Link>
+        </div>
       </div>
 
-      <AddVideoPanel domains={domains} subtopics={subtopics} />
+      <AddVideoPanel
+        domains={domains}
+        subtopics={subtopics}
+        categories={categories}
+      />
 
       <section aria-label="Filters" className="mt-8">
         <form
@@ -101,6 +115,23 @@ export default async function AdminVideosPage({
           </label>
 
           <label className="flex flex-col gap-1 text-sm font-medium text-muted">
+            Category
+            <select
+              name="category"
+              defaultValue={filters.category ?? ""}
+              className="rounded-xl border border-hairline bg-surface px-3 py-2 text-[0.9375rem] text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+            >
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                  {category.isActive ? "" : " (hidden)"}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm font-medium text-muted">
             Status
             <select
               name="status"
@@ -139,6 +170,7 @@ export default async function AdminVideosPage({
           videos={videos}
           domains={domains}
           subtopics={subtopics}
+          categories={categories}
         />
       </section>
     </div>

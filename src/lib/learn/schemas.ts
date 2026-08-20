@@ -16,6 +16,22 @@ const choiceField = z.number().int().min(0).max(3);
 export const SubmitQuestionSchema = z.object({
   questionId: z.uuid(),
   choice: choiceField,
+  /**
+   * The question bank sitting this attempt belongs to, or null when there is
+   * none (the session call failed, or the player was mounted before one
+   * existed). Null is a real answer, not an error: the attempt still counts
+   * for mastery and streak, it just does not appear grouped on Progress.
+   *
+   * The database re-checks that the id names a session the caller owns which
+   * is still open, and silently downgrades anything else to null — so a
+   * forged id can misattribute nothing.
+   */
+  sessionId: z.uuid().nullable().catch(null),
+});
+
+/** Closing a sitting. The id is re-checked against the caller server-side. */
+export const CloseSessionSchema = z.object({
+  sessionId: z.uuid(),
 });
 
 export const StartPracticeSchema = z.object({
@@ -31,6 +47,31 @@ export const SubmitPracticeSchema = z.object({
   answers: z
     .array(z.object({ questionId: z.uuid(), choice: choiceField }))
     .max(60),
+});
+
+// --- Practice tests (full / half) -------------------------------------------
+
+export const StartPracticeTestSchema = z.object({
+  testId: z.uuid(),
+});
+
+/** Every per-attempt control action takes exactly this. */
+export const TestAttemptSchema = z.object({
+  attemptId: z.uuid(),
+});
+
+/**
+ * One autosaved answer.
+ *
+ * There is no `moduleNumber` here on purpose: which module is live is derived
+ * server-side from the attempt's timestamps. Accepting it from the client
+ * would be accepting an assertion the client has no business making — and it
+ * is exactly the field someone would forge to answer module 2 during module 1.
+ */
+export const SavePracticeTestResponseSchema = z.object({
+  attemptId: z.uuid(),
+  questionId: z.uuid(),
+  choice: choiceField,
 });
 
 /**
@@ -77,6 +118,12 @@ export type QuestionFilters = z.infer<typeof QuestionFiltersSchema>;
  * value never reaches a SQL pattern, so wildcards need no escaping.
  */
 export const VideoFiltersSchema = QuestionFiltersSchema.extend({
+  /**
+   * A dynamic video category slug. Videos only — the question bank and
+   * practice tests keep the fixed domain/subtopic structure, so this field
+   * deliberately does not exist on `QuestionFiltersSchema`.
+   */
+  category: slugField,
   q: z
     .string()
     .trim()

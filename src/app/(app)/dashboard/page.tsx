@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ActivityHeatmap } from "@/components/app/ActivityHeatmap";
 import { CtaButton } from "@/components/CtaButton";
 import { requireUser } from "@/lib/auth/require-user";
 import {
+  finalizeOpenQuestionBankSessions,
+  finalizeStalePracticeTestAttempts,
   getContinueTarget,
   getCurrentStreak,
   getDomainMastery,
@@ -11,6 +14,9 @@ import {
   getUserStats,
   suggestFocusDomain,
 } from "@/lib/learn/data";
+import type { UserStats } from "@/lib/learn/data";
+import { buildHeatmapDays, getDailyActivity } from "@/lib/learn/progress";
+import { getViewerTimeZone } from "@/lib/learn/viewer-timezone";
 import { formatSeconds } from "@/lib/learn/types";
 
 export const metadata: Metadata = {
@@ -44,14 +50,27 @@ export default async function DashboardPage() {
     );
   }
 
-  const [stats, streak, todayCount, mastery, continueTarget] =
+  // The dashboard is neither the question player nor a live test, so anything
+  // still open is over. Closing before the counts are read is what keeps
+  // today's goal and the heatmap agreeing with the Progress page.
+  await Promise.all([
+    finalizeOpenQuestionBankSessions(supabase),
+    finalizeStalePracticeTestAttempts(supabase),
+  ]);
+
+  const timeZone = await getViewerTimeZone();
+
+  const [stats, streak, todayCount, mastery, continueTarget, activity] =
     await Promise.all([
       getUserStats(supabase, user.id),
       getCurrentStreak(supabase),
       getTodayAttemptCount(supabase, user.id),
       getDomainMastery(supabase),
       getContinueTarget(supabase, user.id),
+      getDailyActivity(supabase, timeZone),
     ]);
+
+  const heatmapCells = buildHeatmapDays(timeZone);
 
   const focus = suggestFocusDomain(mastery);
   const firstName = profile.fullName?.split(" ")[0] ?? null;
@@ -94,6 +113,17 @@ export default async function DashboardPage() {
         </p>
       </header>
 
+      {/* --- Activity heatmap ---------------------------------------------
+          Sits directly under the streak it explains: the streak says how many
+          days in a row, this says what those days actually looked like. */}
+      <div className="mt-8">
+        <ActivityHeatmap
+          cells={heatmapCells}
+          activity={activity}
+          timeZone={timeZone}
+        />
+      </div>
+
       {/* --- Stat cards ---------------------------------------------------- */}
       <section
         aria-label="Your stats"
@@ -119,17 +149,29 @@ export default async function DashboardPage() {
           )}
         </article>
 
-        {/* Deliberately empty until onboarding ships: no fake number. */}
-        <article className="rounded-2xl border border-dashed border-hairline p-6">
+        <article className="rounded-2xl border border-hairline bg-surface p-6">
           <h2 className="text-[0.9375rem] font-semibold text-muted">
             Target score
           </h2>
-          <p className="mt-2 font-display text-5xl font-extrabold text-hairline">
-            —
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            You&apos;ll set a target during onboarding — coming soon.
-          </p>
+          {stats.targetScore !== null ? (
+            <>
+              <p className="mt-2 font-display text-5xl font-extrabold text-ink">
+                {stats.targetScore}
+              </p>
+              <p className="mt-1 text-sm text-muted">{targetSubtitle(stats)}</p>
+            </>
+          ) : (
+            <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted">
+              No target set yet. You can add one in{" "}
+              <Link
+                href="/settings"
+                className="font-semibold text-accent transition-colors hover:text-accent-hover"
+              >
+                Settings
+              </Link>
+              .
+            </p>
+          )}
         </article>
 
         <article className="rounded-2xl border border-hairline bg-surface p-6 sm:col-span-2 lg:col-span-1">
@@ -249,4 +291,46 @@ export default async function DashboardPage() {
       </section>
     </div>
   );
+}
+
+
+/**
+ * The line under the target number. Prefers the countdown when a test date is
+ * set — a deadline motivates more than a gap does — and falls back to the gap,
+ * then to nothing but the scale.
+ */
+function targetSubtitle(stats: UserStats): string {
+  const weeks = weeksUntil(stats.testDate);
+
+  if (weeks !== null) {
+    if (weeks <= 0) return "Test day is here — good luck.";
+    if (weeks === 1) return "1 week until your test";
+    return `${weeks} weeks until your test`;
+  }
+
+  if (
+    stats.currentScoreEstimate !== null &&
+    stats.targetScore !== null &&
+    stats.targetScore > stats.currentScoreEstimate
+  ) {
+    return `${stats.targetScore - stats.currentScoreEstimate} points to go`;
+  }
+
+  return "out of 800";
+}
+
+/** Whole weeks from today to a `YYYY-MM-DD`, or null when unset/unparseable. */
+function weeksUntil(testDate: string | null): number | null {
+  if (!testDate) return null;
+
+  const target = new Date(`${testDate}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const days = Math.round(
+    (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+  );
+  return Math.max(0, Math.ceil(days / 7));
 }

@@ -69,6 +69,25 @@ export type PracticeSubmitFailure = {
   message: string;
 };
 
+// --- Practice test action results --------------------------------------------
+
+/** Generic outcome for the per-attempt control actions. */
+export type TestActionResult =
+  | { status: "ok" }
+  | { status: "error" | "rate_limited"; message: string };
+
+export type StartTestResult =
+  | { status: "ok"; attemptId: string }
+  | { status: "error" | "rate_limited"; message: string };
+
+/**
+ * What ending a module leads to. The database returns this, so the runner
+ * never has to work out whether a full test still has a module left.
+ */
+export type TestSubmitResult =
+  | { status: "ok"; next: "interstitial" | "completed" }
+  | { status: "error" | "rate_limited"; message: string };
+
 export const CHOICE_LETTERS = ["A", "B", "C", "D"] as const;
 
 /** `615` → `"10:15"`. Used by the timer and the results summary. */
@@ -78,3 +97,29 @@ export function formatSeconds(totalSeconds: number): string {
   const seconds = clamped % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
+
+/**
+ * `615` → `"10:15"`, `4092` → `"1:08:12"`.
+ *
+ * Separate from `formatSeconds` because a full practice test runs past an
+ * hour, where `formatSeconds` would render 70 minutes as "70:12" — readable,
+ * but not what anyone writes down. Minutes are zero-padded only once an hour
+ * is present, so a question bank sitting still reads "35:29".
+ */
+export function formatDuration(totalSeconds: number): string {
+  const clamped = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(clamped / 3600);
+  const minutes = Math.floor((clamped % 3600) / 60);
+  const seconds = clamped % 60;
+
+  if (hours === 0) {
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+/** Seconds per practice-test module. Mirrors `sat_module_seconds()` in SQL. */
+export const MODULE_SECONDS = 2100;
+
+/** Questions per module. Mirrors `sat_module_question_count()` in SQL. */
+export const MODULE_QUESTION_COUNT = 22;

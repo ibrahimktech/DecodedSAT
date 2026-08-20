@@ -20,7 +20,10 @@ type VideoCardProps = {
   title: string;
   youtubeId: string;
   description: string;
-  subtopicName: string;
+  /** Set on a domain video. Mutually exclusive with `categoryName`. */
+  subtopicName: string | null;
+  /** Set on a general video filed under a dynamic category. */
+  categoryName: string | null;
 };
 
 export function VideoCard({
@@ -29,6 +32,7 @@ export function VideoCard({
   youtubeId,
   description,
   subtopicName,
+  categoryName,
 }: VideoCardProps) {
   // Ids come from the seeded `videos` table, never from user input — the
   // encoding is belt-and-braces against a malformed row, not a trust boundary.
@@ -71,9 +75,19 @@ export function VideoCard({
         <p className="text-[0.9375rem] leading-relaxed text-muted">
           {description}
         </p>
-        <p className="mt-auto self-start rounded-lg bg-accent-chip px-2.5 py-1 text-xs font-semibold text-accent">
-          {subtopicName}
-        </p>
+        {/* Green for a subtopic, amber for a category. The palette already
+            carries that distinction — amber is the "general insight" hue —
+            so the two kinds of video are told apart at a glance without a
+            second label. */}
+        {subtopicName ? (
+          <p className="mt-auto self-start rounded-lg bg-accent-chip px-2.5 py-1 text-xs font-semibold text-accent">
+            {subtopicName}
+          </p>
+        ) : categoryName ? (
+          <p className="mt-auto self-start rounded-lg bg-insight-chip px-2.5 py-1 text-xs font-semibold text-insight-dark">
+            {categoryName}
+          </p>
+        ) : null}
       </div>
     </article>
   );

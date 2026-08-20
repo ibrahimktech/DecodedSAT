@@ -71,6 +71,26 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    href: "/admin/practice-tests",
+    label: "Practice tests",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <rect x="4" y="3" width="16" height="18" rx="2" />
+        <path d="M8 8h5M8 12h8M8 16h6" />
+      </svg>
+    ),
+  },
+  {
+    href: "/admin/video-categories",
+    label: "Video categories",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17z" />
+        <path d="M21 9v9a1.5 1.5 0 0 1-1.5 1.5H7" />
+      </svg>
+    ),
+  },
+  {
     href: "/admin/users",
     label: "Users",
     icon: (

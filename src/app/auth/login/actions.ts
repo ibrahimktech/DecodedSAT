@@ -14,14 +14,14 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { APP_URL } from "@/lib/env";
-import { LoginSchema } from "@/lib/auth/schemas";
+import { LoginSchema, captchaTokenMissing } from "@/lib/auth/schemas";
 import {
   type AuthFormState,
   GENERIC_ERROR_MESSAGE,
   rateLimitedMessage,
 } from "@/lib/auth/state";
 import { describeError } from "@/lib/auth/describe-error";
-import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
+import { createRateLimiter, getClientIp, limitFromEnv } from "@/lib/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
@@ -35,7 +35,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * every submission before either limiter is consulted.
  */
 const loginIpLimiter = createRateLimiter({
-  limit: 40,
+  limit: limitFromEnv("LOGIN_IP", 100),
   windowMs: 10 * 60_000,
   prefix: "login-ip",
 });
@@ -50,7 +50,7 @@ const loginIpLimiter = createRateLimiter({
  * enough that a person mistyping their own password never reaches it.
  */
 const loginAccountLimiter = createRateLimiter({
-  limit: 10,
+  limit: limitFromEnv("LOGIN_ACCOUNT", 25),
   windowMs: 15 * 60_000,
   prefix: "login-account",
 });
@@ -98,6 +98,9 @@ export async function logInAction(
 
   if (!parsed.success) return failed;
 
+  // See the signup action: required only when a captcha is actually configured.
+  if (captchaTokenMissing(parsed.data.captchaToken)) return failed;
+
   const accountRate = await loginAccountLimiter.check(
     await accountKey(parsed.data.email),
   );
@@ -123,7 +126,9 @@ export async function logInAction(
       email: parsed.data.email,
       password: parsed.data.password,
       // Supabase verifies this against the secret held in its dashboard.
-      options: { captchaToken: parsed.data.captchaToken },
+      // Empty means no captcha is configured; undefined skips verification
+      // rather than asking Supabase to verify an empty string.
+      options: { captchaToken: parsed.data.captchaToken || undefined },
     });
 
     if (error) {

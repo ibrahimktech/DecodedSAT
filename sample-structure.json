@@ -1,0 +1,256 @@
+{
+  "_read_me_first": [
+    "REFERENCE FILE — this whole document is not uploadable as-is.",
+    "It documents both upload formats in one place. To upload, copy the value of",
+    "`question_set_upload` or `practice_test_upload` into its own .json file.",
+    "Keys beginning with an underscore are documentation and appear in no real upload.",
+    "Two working files sit beside this one: sample-question-set.json and",
+    "sample-practice-test.json. Both are valid and can be uploaded directly."
+  ],
+
+  "_the_one_thing_that_will_bite_you": [
+    "JSON eats backslashes. Every LaTeX command needs a DOUBLE backslash in the file.",
+    "Write  \\\\frac{1}{3}  in the JSON to get  \\frac{1}{3}  in the question.",
+    "Write  \\\\sqrt{x}    in the JSON to get  \\sqrt{x}    in the question.",
+    "A single backslash is either a JSON syntax error or a silently wrong escape.",
+    "If a question renders with the command name showing as literal text, this is why."
+  ],
+
+  "_math_is_written_in_latex": [
+    "Wrap every mathematical expression in single dollar signs: $x^{2} + 1$.",
+    "Text outside the dollars renders as normal prose. Keep prose OUTSIDE the dollars —",
+    "$If x = 2$ renders the word 'If' in italic maths font, which looks wrong.",
+    "A literal dollar sign (a price) is written \\\\$ — see the cheatsheet below.",
+    "Nothing converts this for you: what you write is what students see."
+  ],
+
+  "_math_cheatsheet": {
+    "_columns": "what you want  ->  what to type inside the $...$  ->  what to write in the JSON file",
+    "fraction (stacked, one third)": {
+      "latex": "\\frac{1}{3}",
+      "in_json": "$\\\\frac{1}{3}$",
+      "never_write": "1/3  — renders as a flat slash and looks unfinished"
+    },
+    "fraction with an expression": {
+      "latex": "\\frac{x + 1}{2}",
+      "in_json": "$\\\\frac{x + 1}{2}$"
+    },
+    "square root": {
+      "latex": "\\sqrt{x}",
+      "in_json": "$\\\\sqrt{x}$",
+      "never_write": "sqrt(x)"
+    },
+    "cube / nth root": {
+      "latex": "\\sqrt[3]{x}",
+      "in_json": "$\\\\sqrt[3]{x}$"
+    },
+    "pi": {
+      "latex": "\\pi",
+      "in_json": "$\\\\pi r^{2}$",
+      "never_write": "pi  — renders as the two letters p and i"
+    },
+    "multiplication": {
+      "latex": "\\cdot",
+      "in_json": "$\\\\frac{1}{3} \\\\cdot \\\\pi \\\\cdot r^{2} \\\\cdot h$",
+      "never_write": "*  — an asterisk is not a multiplication sign",
+      "note": "Use \\\\times only for scientific notation: $3 \\\\times 10^{8}$"
+    },
+    "division": { "latex": "\\div", "in_json": "$12 \\\\div 4 = 3$" },
+    "exponent": {
+      "latex": "x^{2}",
+      "in_json": "$x^{2}$",
+      "note": "Always brace the exponent. x^10 renders as x¹0; x^{10} renders as x¹⁰."
+    },
+    "subscript": { "latex": "x_{1}", "in_json": "$x_{1}$" },
+    "less / greater than or equal": {
+      "latex": "\\leq  \\geq",
+      "in_json": "$x \\\\leq 5$"
+    },
+    "not equal / approximately": {
+      "latex": "\\neq  \\approx",
+      "in_json": "$x \\\\neq 0$"
+    },
+    "plus or minus": { "latex": "\\pm", "in_json": "$x = \\\\pm 3$" },
+    "degrees": { "latex": "^{\\circ}", "in_json": "$90^{\\\\circ}$" },
+    "angle": { "latex": "\\angle", "in_json": "$\\\\angle ABC$" },
+    "absolute value": { "latex": "|x|", "in_json": "$|x - 3| = 5$" },
+    "infinity": { "latex": "\\infty", "in_json": "$\\\\infty$" },
+    "a percent sign INSIDE maths": {
+      "latex": "\\%",
+      "in_json": "$20\\\\%$",
+      "why": "A bare % starts a comment in LaTeX and silently swallows the rest of the line."
+    },
+    "a dollar sign (a price)": {
+      "latex": "\\$",
+      "in_json": "The jacket costs \\\\$250.",
+      "why": "A bare $ opens a maths span and swallows the sentence up to the next $. Prices are prose — keep them OUTSIDE any $...$ and escape them."
+    },
+    "words inside a maths expression": {
+      "latex": "\\text{cost}",
+      "in_json": "$\\\\text{cost} = 3x$"
+    }
+  },
+
+  "_domains_and_subtopics": {
+    "_note": "domain and subtopic are matched case-insensitively, by name or by slug. An unknown pair is rejected with a reason unless create_new_subtopics is true.",
+    "Algebra": [
+      "Linear equations in one variable",
+      "Systems of linear equations",
+      "Linear functions & graphs"
+    ],
+    "Advanced Math": [
+      "Quadratics & parabolas",
+      "Exponents & radicals",
+      "Function notation & transformations"
+    ],
+    "Problem-Solving & Data Analysis": [
+      "Ratios, rates & proportions",
+      "Percentages",
+      "Mean, median & spread"
+    ],
+    "Geometry & Trigonometry": [
+      "Triangle properties",
+      "Circles: area, circumference & arcs",
+      "Right-triangle trigonometry"
+    ]
+  },
+
+  "_field_reference": {
+    "external_id": "Required. Your own id, unique within the set. Re-uploading a file skips rows whose external_id already exists in that set, so uploads are repeatable. Max 64 chars.",
+    "domain": "Required. One of the four above. Max 100 chars.",
+    "subtopic": "Required. Must belong to that domain, unless create_new_subtopics is true. Max 120 chars.",
+    "prompt": "Required. The question. Max 4000 chars.",
+    "choices": "Required. Exactly four, labelled exactly A, B, C and D. Order in the file does not matter; storage sorts by label. Each text max 1000 chars.",
+    "correct_answer": "Required. One of \"A\", \"B\", \"C\", \"D\".",
+    "explanation": "Required. Shown after answering, and on the practice test review screen. Max 4000 chars.",
+    "difficulty": "Required. One of \"easy\", \"medium\", \"hard\".",
+    "module_number": "PRACTICE TESTS ONLY. 1 or 2. Omit entirely from a question set upload.",
+    "_limits": "500 questions per question-set upload, 1 MB per file. A practice test is exactly 22 or 44."
+  },
+
+  "question_set_upload": {
+    "_this_is_the_uploadable_shape": "Copy this object into its own .json file and upload it at /admin/questions.",
+    "set_name": "My New Set — Algebra",
+    "set_description": "Optional. Only applied when the set is first created.",
+    "create_new_subtopics": false,
+    "questions": [
+      {
+        "external_id": "demo-frac-01",
+        "domain": "Algebra",
+        "subtopic": "Linear equations in one variable",
+        "prompt": "If $\\frac{1}{3}x - 2 = 5$, what is the value of $x$?",
+        "choices": [
+          { "label": "A", "text": "$7$" },
+          { "label": "B", "text": "$9$" },
+          { "label": "C", "text": "$18$" },
+          { "label": "D", "text": "$21$" }
+        ],
+        "correct_answer": "D",
+        "explanation": "Add $2$ to both sides to get $\\frac{1}{3}x = 7$, then multiply both sides by $3$: $x = 21$.",
+        "difficulty": "easy"
+      },
+      {
+        "external_id": "demo-pi-cdot-01",
+        "domain": "Geometry & Trigonometry",
+        "subtopic": "Circles: area, circumference & arcs",
+        "prompt": "The volume of a cone is $V = \\frac{1}{3} \\cdot \\pi \\cdot r^{2} \\cdot h$. What is the volume of a cone with radius $3$ and height $4$?",
+        "choices": [
+          { "label": "A", "text": "$4\\pi$" },
+          { "label": "B", "text": "$12\\pi$" },
+          { "label": "C", "text": "$36\\pi$" },
+          { "label": "D", "text": "$48\\pi$" }
+        ],
+        "correct_answer": "B",
+        "explanation": "Substitute $r = 3$ and $h = 4$: $V = \\frac{1}{3} \\cdot \\pi \\cdot 3^{2} \\cdot 4 = \\frac{1}{3} \\cdot \\pi \\cdot 36 = 12\\pi$.",
+        "difficulty": "medium"
+      },
+      {
+        "external_id": "demo-sqrt-01",
+        "domain": "Advanced Math",
+        "subtopic": "Exponents & radicals",
+        "prompt": "What is the value of $\\sqrt{144} + \\sqrt[3]{27}$?",
+        "choices": [
+          { "label": "A", "text": "$12$" },
+          { "label": "B", "text": "$15$" },
+          { "label": "C", "text": "$18$" },
+          { "label": "D", "text": "$21$" }
+        ],
+        "correct_answer": "B",
+        "explanation": "$\\sqrt{144} = 12$ because $12^{2} = 144$, and $\\sqrt[3]{27} = 3$ because $3^{3} = 27$. So the sum is $12 + 3 = 15$.",
+        "difficulty": "easy"
+      },
+      {
+        "external_id": "demo-money-percent-01",
+        "domain": "Problem-Solving & Data Analysis",
+        "subtopic": "Percentages",
+        "prompt": "A jacket costs \\$250. Its price is increased by $20\\%$. What is the new price, in dollars?",
+        "choices": [
+          { "label": "A", "text": "$270$" },
+          { "label": "B", "text": "$280$" },
+          { "label": "C", "text": "$300$" },
+          { "label": "D", "text": "$320$" }
+        ],
+        "correct_answer": "C",
+        "explanation": "$20\\%$ of \\$250 is \\$50, so the new price is \\$250 + \\$50 = \\$300. Note the prices sit outside the maths and are written with an escaped dollar sign.",
+        "difficulty": "medium"
+      },
+      {
+        "external_id": "demo-slope-01",
+        "domain": "Algebra",
+        "subtopic": "Linear functions & graphs",
+        "prompt": "A line passes through $(-2, 1)$ and $(2, 7)$. What is its slope?",
+        "choices": [
+          { "label": "A", "text": "$\\frac{2}{3}$" },
+          { "label": "B", "text": "$\\frac{3}{2}$" },
+          { "label": "C", "text": "$2$" },
+          { "label": "D", "text": "$3$" }
+        ],
+        "correct_answer": "B",
+        "explanation": "Slope is the change in $y$ over the change in $x$: $\\frac{7 - 1}{2 - (-2)} = \\frac{6}{4} = \\frac{3}{2}$.",
+        "difficulty": "medium"
+      }
+    ]
+  },
+
+  "practice_test_upload": {
+    "_this_is_the_uploadable_shape": "Copy this object into its own .json file. Create the test at /admin/practice-tests FIRST, then upload the questions on that test's page.",
+    "_there_is_no_set_name_here": "A practice test names its own question set automatically, from the test title you typed in the admin form.",
+    "_counts_are_enforced_exactly": "A FULL test needs exactly 22 questions with module_number 1 and exactly 22 with module_number 2. A HALF test needs exactly 22 with module_number 1 and none with 2. A wrong count rejects the whole file and imports nothing — it reports what it found against what it expected.",
+    "_only_difference_from_a_question_set": "every question carries module_number.",
+    "create_new_subtopics": false,
+    "questions": [
+      {
+        "external_id": "pt-demo-m1-01",
+        "module_number": 1,
+        "domain": "Algebra",
+        "subtopic": "Linear equations in one variable",
+        "prompt": "If $5x - 3 = 17$, what is the value of $x$?",
+        "choices": [
+          { "label": "A", "text": "$2$" },
+          { "label": "B", "text": "$3$" },
+          { "label": "C", "text": "$4$" },
+          { "label": "D", "text": "$7$" }
+        ],
+        "correct_answer": "C",
+        "explanation": "Add $3$ to both sides to get $5x = 20$, then divide both sides by $5$: $x = 4$.",
+        "difficulty": "easy"
+      },
+      {
+        "external_id": "pt-demo-m2-01",
+        "module_number": 2,
+        "domain": "Geometry & Trigonometry",
+        "subtopic": "Right-triangle trigonometry",
+        "prompt": "In right triangle $ABC$, the right angle is at $C$, the side opposite $\\angle A$ has length $5$, and the hypotenuse has length $13$. What is $\\sin(A)$?",
+        "choices": [
+          { "label": "A", "text": "$\\frac{5}{13}$" },
+          { "label": "B", "text": "$\\frac{12}{13}$" },
+          { "label": "C", "text": "$\\frac{5}{12}$" },
+          { "label": "D", "text": "$\\frac{13}{5}$" }
+        ],
+        "correct_answer": "A",
+        "explanation": "$\\sin$ is opposite over hypotenuse. The side opposite $\\angle A$ is $5$ and the hypotenuse is $13$, so $\\sin(A) = \\frac{5}{13}$.",
+        "difficulty": "hard"
+      }
+    ]
+  }
+}

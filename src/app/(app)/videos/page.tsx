@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { VideoCard } from "@/components/app/VideoCard";
 import { requireUser } from "@/lib/auth/require-user";
-import { getDomains, getVideos } from "@/lib/learn/data";
+import { getDomains, getVideoCategories, getVideos } from "@/lib/learn/data";
 import { VideoFiltersSchema } from "@/lib/learn/schemas";
 
 export const metadata: Metadata = {
@@ -30,15 +30,27 @@ export default async function VideosPage({
   const filters = VideoFiltersSchema.parse({
     domain: typeof params.domain === "string" ? params.domain : undefined,
     subtopic: typeof params.subtopic === "string" ? params.subtopic : undefined,
+    category: typeof params.category === "string" ? params.category : undefined,
     q: typeof params.q === "string" ? params.q : undefined,
   });
 
-  const domains = await getDomains(supabase);
-  const activeDomain = domains.find((domain) => domain.slug === filters.domain);
+  const [domains, categories] = await Promise.all([
+    getDomains(supabase),
+    getVideoCategories(supabase),
+  ]);
 
+  const activeDomain = domains.find((domain) => domain.slug === filters.domain);
+  const activeCategory = categories.find(
+    (category) => category.slug === filters.category,
+  );
+
+  // Domain and category are one axis with two kinds of value, not two
+  // independent filters — a video is filed under one or the other, so
+  // selecting both would always return nothing. A domain chip wins.
   const fetched = await getVideos(supabase, {
     domainId: activeDomain?.id,
     subtopicSlug: filters.subtopic,
+    categorySlug: activeDomain || filters.subtopic ? undefined : activeCategory?.slug,
   });
 
   // Title-only search, matched in process against rows RLS already released —
@@ -66,6 +78,9 @@ export default async function VideosPage({
       <form action="/videos" method="get" className="mt-6" role="search">
         {activeDomain && (
           <input type="hidden" name="domain" value={activeDomain.slug} />
+        )}
+        {!activeDomain && activeCategory && (
+          <input type="hidden" name="category" value={activeCategory.slug} />
         )}
         <div className="flex max-w-xl items-center gap-2 rounded-xl border border-hairline bg-surface px-4 py-2.5 focus-within:border-accent">
           <svg
@@ -105,9 +120,9 @@ export default async function VideosPage({
       <nav aria-label="Filter by domain" className="mt-4 flex flex-wrap gap-2">
         <FilterChip
           href={videosHref({ q: filters.q })}
-          active={!activeDomain && !filters.subtopic}
+          active={!activeDomain && !filters.subtopic && !activeCategory}
         >
-          All domains
+          Everything
         </FilterChip>
         {domains.map((domain) => (
           <FilterChip
@@ -120,9 +135,32 @@ export default async function VideosPage({
         ))}
       </nav>
 
+      {/* Categories are the second kind of shelf: videos that fix a general
+          gap rather than a specific subtopic. Admin-managed and fully
+          dynamic, so this row is empty until categories exist — which is why
+          it renders nothing at all rather than an empty heading. */}
+      {categories.length > 0 && (
+        <nav
+          aria-label="Filter by category"
+          className="mt-3 flex flex-wrap items-center gap-2"
+        >
+          <span className="text-sm font-semibold text-muted">Guides:</span>
+          {categories.map((category) => (
+            <FilterChip
+              key={category.id}
+              href={videosHref({ category: category.slug, q: filters.q })}
+              active={activeCategory?.id === category.id && !activeDomain}
+            >
+              {category.name}
+            </FilterChip>
+          ))}
+        </nav>
+      )}
+
       {filters.subtopic && videos.length > 0 && (
         <p className="mt-4 rounded-xl bg-insight-chip px-4 py-3 text-[0.9375rem] text-insight-dark">
-          Showing explainers for <strong>{videos[0].subtopicName}</strong> —{" "}
+          Showing explainers for{" "}
+          <strong>{videos[0].subtopicName ?? "this topic"}</strong> —{" "}
           <Link href="/videos" className="font-semibold underline">
             show all
           </Link>
@@ -135,7 +173,10 @@ export default async function VideosPage({
             <>
               No video titles match &ldquo;{filters.q}&rdquo;.{" "}
               <Link
-                href={videosHref({ domain: activeDomain?.slug })}
+                href={videosHref({
+                  domain: activeDomain?.slug,
+                  category: activeCategory?.slug,
+                })}
                 className="font-semibold text-accent transition-colors hover:text-accent-hover"
               >
                 Clear the search
@@ -164,6 +205,7 @@ export default async function VideosPage({
               youtubeId={video.youtubeId}
               description={video.description}
               subtopicName={video.subtopicName}
+              categoryName={video.categoryName}
             />
           ))}
         </div>
@@ -173,9 +215,14 @@ export default async function VideosPage({
 }
 
 /** `/videos` URL with only the params that are actually set. */
-function videosHref(params: { domain?: string; q?: string }): string {
+function videosHref(params: {
+  domain?: string;
+  category?: string;
+  q?: string;
+}): string {
   const search = new URLSearchParams();
   if (params.domain) search.set("domain", params.domain);
+  else if (params.category) search.set("category", params.category);
   if (params.q) search.set("q", params.q);
   const qs = search.toString();
   return qs ? `/videos?${qs}` : "/videos";

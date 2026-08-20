@@ -51,6 +51,39 @@ export type RateLimiterOptions = {
   prefix: string;
 };
 
+/**
+ * A limit that an environment variable may raise or lower.
+ *
+ * Every budget in this project is a judgement call about a production surface,
+ * and those judgements belong in the code as the default. But the same numbers
+ * that are right for strangers on the internet are wrong for the person
+ * building the thing, who legitimately needs to create thirty accounts in an
+ * afternoon — and editing a constant to do that risks the looser number being
+ * committed and shipped.
+ *
+ * So: the safe number lives here as `fallback`, and `RATE_LIMIT_<NAME>` in
+ * `.env.local` overrides it. `.env.local` is gitignored, so a relaxed
+ * development budget cannot reach production by accident.
+ *
+ * A non-numeric or non-positive override is ignored rather than obeyed — a
+ * typo must not silently disable a limiter.
+ */
+export function limitFromEnv(name: string, fallback: number): number {
+  const raw = process.env[`RATE_LIMIT_${name}`];
+  if (!raw) return fallback;
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.warn(
+      `[rate-limit] ignoring RATE_LIMIT_${name}="${raw}" — not a positive integer. ` +
+        `Using the default of ${fallback}.`,
+    );
+    return fallback;
+  }
+
+  return parsed;
+}
+
 // --- Shared store: Upstash Redis over REST ----------------------------------
 
 const UPSTASH_URL = (process.env.UPSTASH_REDIS_REST_URL || "").replace(

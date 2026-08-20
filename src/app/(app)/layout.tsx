@@ -1,8 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { NavRail } from "@/components/app/NavRail";
+import { TimeZoneSync } from "@/components/app/TimeZoneSync";
 import { getIsAdmin } from "@/lib/auth/admin";
+import { requireOnboarded } from "@/lib/auth/require-onboarded";
 import { requireUser } from "@/lib/auth/require-user";
+
+/**
+ * KaTeX's stylesheet, imported once per surface that renders question
+ * content. Next dedupes the import, so listing it in both app shells costs
+ * nothing and keeps the landing page — which renders no math — from carrying
+ * it. The fonts it references are resolved as bundled assets and fetched by
+ * the browser only when a glyph actually needs one.
+ */
+import "katex/dist/katex.min.css";
 
 /**
  * Shell for the signed-in product.
@@ -32,6 +43,13 @@ export default async function AppLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   await requireUser();
 
+  // Nobody reaches the student app before finishing onboarding. Same three
+  // layers again: the proxy redirects first, this catches anything that got
+  // past it, and the database refuses a second write regardless. Admins are
+  // exempt — see `requireOnboarded`. Both calls below are request-cached, so
+  // they share the one `getUser()` the line above already paid for.
+  await requireOnboarded();
+
   // Admins can browse the student app freely ("view as student"); this strip
   // is their way back. Purely presentational — rendering it for a non-admin
   // would grant nothing, since /admin re-checks server-side and RLS re-checks
@@ -40,6 +58,11 @@ export default async function AppLayout({
 
   return (
     <div className="flex min-h-screen">
+      {/* Renders nothing. Writes the viewer's IANA zone to a cookie so the
+          Progress page and the dashboard heatmap can group dates the way the
+          student reads them. Everything else stays UTC — see
+          `@/lib/learn/timezone`. */}
+      <TimeZoneSync />
       <NavRail />
       <div className="flex min-w-0 flex-1 flex-col">
         {isAdmin && (

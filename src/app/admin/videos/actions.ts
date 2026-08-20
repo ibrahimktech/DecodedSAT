@@ -91,6 +91,24 @@ export async function lookupVideoAction(
   }
 }
 
+/**
+ * Turns the validated placement union into the two columns it maps to.
+ *
+ * Both are written on every save, one of them to null — so re-filing a
+ * domain video under a category actually clears the subtopic instead of
+ * leaving a stale one behind and tripping the `videos_have_a_type` CHECK's
+ * intent (which only requires that at least one is set).
+ */
+function placementColumns(
+  data:
+    | { kind: "domain"; subtopicId: string }
+    | { kind: "category"; videoCategoryId: string },
+): { subtopic_id: string | null; video_category_id: string | null } {
+  return data.kind === "domain"
+    ? { subtopic_id: data.subtopicId, video_category_id: null }
+    : { subtopic_id: null, video_category_id: data.videoCategoryId };
+}
+
 export async function addVideoAction(
   input: unknown,
 ): Promise<AdminActionResult> {
@@ -108,7 +126,10 @@ export async function addVideoAction(
 
     const parsed = SaveVideoSchema.safeParse(input);
     if (!parsed.success) {
-      return { status: "error", message: "Check the fields and try again." };
+      return {
+        status: "error",
+        message: "Pick a subtopic or a category, then check the fields.",
+      };
     }
 
     if (!(await fetchYoutubeOembed(parsed.data.youtubeId))) {
@@ -121,7 +142,7 @@ export async function addVideoAction(
     }
 
     const { error } = await context.supabase.from("videos").insert({
-      subtopic_id: parsed.data.subtopicId,
+      ...placementColumns(parsed.data),
       title,
       youtube_id: parsed.data.youtubeId,
       description: sanitizeMultiline(parsed.data.description, 2000),
@@ -135,6 +156,7 @@ export async function addVideoAction(
     }
 
     revalidatePath("/admin/videos");
+    revalidatePath("/admin/video-categories");
     revalidatePath("/admin");
     return { status: "ok" };
   } catch (error) {
@@ -160,7 +182,10 @@ export async function updateVideoAction(
 
     const parsed = EditVideoSchema.safeParse(input);
     if (!parsed.success) {
-      return { status: "error", message: "Check the fields and try again." };
+      return {
+        status: "error",
+        message: "Pick a subtopic or a category, then check the fields.",
+      };
     }
 
     if (!(await fetchYoutubeOembed(parsed.data.youtubeId))) {
@@ -176,7 +201,7 @@ export async function updateVideoAction(
       .from("videos")
       .update(
         {
-          subtopic_id: parsed.data.subtopicId,
+          ...placementColumns(parsed.data),
           title,
           youtube_id: parsed.data.youtubeId,
           description: sanitizeMultiline(parsed.data.description, 2000),
@@ -196,6 +221,7 @@ export async function updateVideoAction(
     }
 
     revalidatePath("/admin/videos");
+    revalidatePath("/admin/video-categories");
     return { status: "ok" };
   } catch (error) {
     console.error(`[admin] video update threw: ${describeError(error)}`);

@@ -137,9 +137,15 @@ export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey: string }) {
           resetKey={state.attempt}
         />
 
+        {/* The token is only required when a site key is configured. With
+            `NEXT_PUBLIC_TURNSTILE_SITE_KEY` unset there is no widget to solve,
+            and gating on a token that can never arrive leaves the form
+            permanently unsubmittable — which is what "captcha is optional"
+            has to mean for it to be usable locally. Supabase still enforces
+            its own captcha setting server-side regardless of this. */}
         <button
           type="submit"
-          disabled={pending || !captchaToken}
+          disabled={pending || (Boolean(turnstileSiteKey) && !captchaToken)}
           className={ctaClassName("primary", "w-full")}
         >
           {pending ? "Creating account…" : "Create account"}

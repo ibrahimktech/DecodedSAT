@@ -16,7 +16,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { APP_URL, SITE_URL } from "@/lib/env";
 import { describeError } from "@/lib/auth/describe-error";
-import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
+import { createRateLimiter, getClientIp, limitFromEnv } from "@/lib/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /** Reads cookies and hits the network — never prerender or cache this. */
@@ -34,7 +34,7 @@ export const dynamic = "force-dynamic";
  * class behind one address — all of which have to fit under the limit.
  */
 const callbackLimiter = createRateLimiter({
-  limit: 20,
+  limit: limitFromEnv("AUTH_CALLBACK", 20),
   windowMs: 10 * 60_000,
   prefix: "auth-callback",
 });

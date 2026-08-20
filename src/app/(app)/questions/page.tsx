@@ -4,6 +4,7 @@ import { QuestionPlayer } from "@/components/app/QuestionPlayer";
 import { CtaButton } from "@/components/CtaButton";
 import { requireUser } from "@/lib/auth/require-user";
 import {
+  finalizeOpenQuestionBankSessions,
   getDomainMastery,
   getQuestionBatch,
   getSubtopics,
@@ -113,6 +114,12 @@ export default async function QuestionsPage({
       </div>
     );
   }
+
+  // The picker, not the player. Reaching it means any sitting that was open is
+  // genuinely over — including one whose tab was closed without finishing — so
+  // this is where dangling sessions get rolled up. Doing it in the player's
+  // branch instead would close the session the student is currently in.
+  await finalizeOpenQuestionBankSessions(supabase);
 
   return (
     <div className="mx-auto max-w-3xl">

@@ -3,6 +3,15 @@ import { AdminNav } from "@/components/admin/AdminNav";
 import { requireAdmin } from "@/lib/auth/admin";
 
 /**
+ * KaTeX's stylesheet, imported once per surface that renders question
+ * content. Next dedupes the import, so listing it in both app shells costs
+ * nothing and keeps the landing page — which renders no math — from carrying
+ * it. The fonts it references are resolved as bundled assets and fetched by
+ * the browser only when a glyph actually needs one.
+ */
+import "katex/dist/katex.min.css";
+
+/**
  * Shell for the admin panel.
  *
  * `requireAdmin()` here is the middle of the three layers: the proxy already

@@ -17,27 +17,37 @@
  */
 
 import { headers } from "next/headers";
-import { AUTH_CALLBACK_URL } from "@/lib/env";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { APP_URL, AUTH_CALLBACK_URL } from "@/lib/env";
 import { sanitizeFullName } from "@/lib/auth/sanitize";
-import { FULL_NAME_MAX, FULL_NAME_MIN, SignupSchema } from "@/lib/auth/schemas";
+import {
+  FULL_NAME_MAX,
+  FULL_NAME_MIN,
+  SignupSchema,
+  captchaTokenMissing,
+} from "@/lib/auth/schemas";
 import {
   type AuthFormState,
   GENERIC_ERROR_MESSAGE,
   rateLimitedMessage,
 } from "@/lib/auth/state";
 import { describeError } from "@/lib/auth/describe-error";
-import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
+import { createRateLimiter, getClientIp, limitFromEnv } from "@/lib/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
- * Thirty accounts per IP per fifteen minutes.
+ * Sixty submissions per IP per fifteen minutes.
  *
- * The honest ceiling for one person is one — nobody signs up twice by
- * accident. The headroom exists entirely for shared NATs, and it is sized by
- * the realistic worst case: a teacher demoing DecodedSAT to a class, where
- * thirty students behind a single school IP all sign up within a few minutes.
- * At a limit of five, twenty-five of them are locked out for a quarter of an
- * hour and the demo is over.
+ * Note "submissions", not "accounts": the check runs before validation, so a
+ * form that fails Zod, fails captcha, or fails at Supabase still spends one.
+ * That is deliberate — an attacker's malformed floods must cost them budget —
+ * but it means the real consumer of this window is *retries*, not signups.
+ *
+ * The honest ceiling for one person is one account. The headroom exists for
+ * shared NATs, sized by the realistic worst case: a teacher demoing
+ * DecodedSAT to a class, where thirty students behind a single school IP all
+ * sign up within a few minutes, and some of them mistype and retry.
  *
  * Raising it costs little, because the per-IP window is not what stops abuse
  * here. Turnstile gates every submission and Supabase verifies the token
@@ -45,7 +55,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * one. This is defence in depth, not the boundary.
  */
 const signupLimiter = createRateLimiter({
-  limit: 30,
+  limit: limitFromEnv("SIGNUP", 60),
   windowMs: 15 * 60_000,
   prefix: "signup",
 });
@@ -87,6 +97,11 @@ export async function signUpAction(
     return failed;
   }
 
+  // A configured captcha that produced no token means the widget never
+  // completed. Checked here rather than in the schema, so that an unconfigured
+  // captcha (no site key, no widget) is not treated as a failed one.
+  if (captchaTokenMissing(parsed.data.captchaToken)) return failed;
+
   // 3. Sanitise --------------------------------------------------------------
   const fullName = sanitizeFullName(parsed.data.fullName, FULL_NAME_MAX);
   if (fullName.length < FULL_NAME_MIN) {
@@ -96,6 +111,9 @@ export async function signUpAction(
   }
 
   // 4. Sign up ---------------------------------------------------------------
+  // Only true when the project has email confirmation disabled; see below.
+  let signedIn = false;
+
   try {
     const supabase = await createSupabaseServerClient();
 
@@ -106,7 +124,10 @@ export async function signUpAction(
         data: { full_name: fullName },
         // Supabase holds the Turnstile secret and verifies this token itself.
         // Tokens are single-use, so we must not also call siteverify.
-        captchaToken: parsed.data.captchaToken,
+        // Empty means no captcha is configured. Send undefined rather than an
+        // empty string, so Supabase skips verification instead of trying to
+        // verify "" and failing.
+        captchaToken: parsed.data.captchaToken || undefined,
         // Never hardcoded — see `@/lib/env` for why this is SITE_URL-based.
         emailRedirectTo: AUTH_CALLBACK_URL,
       },
@@ -136,9 +157,21 @@ export async function signUpAction(
       }
 
       if (error.status === 429) {
+        // Supabase's *email sending* cap is the one people actually hit, and
+        // it resets on the hour — not in sixty seconds. Telling someone to
+        // "wait a minute" here is worse than saying nothing: they retry
+        // immediately, every retry fails the same way, and the retries spend
+        // this app's own IP budget until the login form starts refusing them
+        // too. The honest number is what stops that loop.
+        //
+        // Project-wide condition, not an account-specific one, so saying it
+        // plainly leaks nothing about whether an address is registered.
+        const retryAfterSeconds =
+          error.code === "over_email_send_rate_limit" ? 60 * 60 : 60;
+
         return {
           status: "rate_limited",
-          message: rateLimitedMessage(60),
+          message: rateLimitedMessage(retryAfterSeconds),
           attempt,
         };
       }
@@ -152,13 +185,35 @@ export async function signUpAction(
       return { status: "sent", message: "", attempt };
     }
 
-    // 5. Generic success. No session and no redirect — the account does not
-    // really exist until the confirmation link fires the profiles trigger.
-    return { status: "sent", message: "", attempt };
+    // Supabase returns a session here only when "Confirm email" is turned off
+    // for the project — the account is live immediately, no link was mailed,
+    // and the confirmation triggers have already created the profile and stats
+    // rows. Showing "check your email" in that case sends someone to an inbox
+    // that will stay empty forever.
+    //
+    // Set outside the return so the redirect can happen after the try block.
+    if (data.session) {
+      signedIn = true;
+    } else {
+      // 5. Generic success. No session and no redirect — the account does not
+      // really exist until the confirmation link fires the profiles trigger.
+      return { status: "sent", message: "", attempt };
+    }
   } catch (error) {
     // Missing env vars land here too, and get the same message as everything
     // else. Detail stays in the server log.
     console.error(`[auth] signup threw: ${describeError(error)}`);
     return failed;
   }
+
+  // Outside the try on purpose — `redirect` signals by throwing, and catching
+  // it above would turn a completed signup into a generic error.
+  if (signedIn) {
+    revalidatePath("/dashboard", "layout");
+    // Straight to the app. The proxy sends them on to /onboarding, since a
+    // brand new account has not been through it.
+    redirect(APP_URL);
+  }
+
+  return failed;
 }

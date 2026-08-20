@@ -73,9 +73,15 @@ export default async function WatchVideoPage({
       </div>
 
       <div className="mt-6 flex flex-col gap-2">
-        <p className="self-start rounded-lg bg-accent-chip px-2.5 py-1 text-xs font-semibold text-accent">
-          {video.subtopicName}
-        </p>
+        {video.subtopicName ? (
+          <p className="self-start rounded-lg bg-accent-chip px-2.5 py-1 text-xs font-semibold text-accent">
+            {video.subtopicName}
+          </p>
+        ) : video.categoryName ? (
+          <p className="self-start rounded-lg bg-insight-chip px-2.5 py-1 text-xs font-semibold text-insight-dark">
+            {video.categoryName}
+          </p>
+        ) : null}
         <h1 className="font-display text-2xl font-extrabold text-ink sm:text-3xl">
           {video.title}
         </h1>

@@ -3,10 +3,14 @@
 /**
  * The signed-in app's left navigation rail.
  *
- * Order is fixed by the step spec: the four product pages in sequence,
- * Settings pinned lower, and Logout separated below Settings by a hairline —
- * it is a different class of action (leaves the app) and must not read as a
- * fifth sibling of the pages.
+ * Order is fixed by the step spec: the product pages in sequence, Settings
+ * pinned lower, and Logout separated below Settings by a hairline — it is a
+ * different class of action (leaves the app) and must not read as another
+ * sibling of the pages.
+ *
+ * "Practice" rather than "Practice tests" because that page is now a hub over
+ * two things: the full/half tests added in step 7 and the section drills from
+ * step 4. Naming it after only one of them would bury the other.
  *
  * Client component only for `usePathname()` (active-state highlighting); the
  * sign-out form posts straight to the existing Server Action.
@@ -70,12 +74,22 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/practice",
-    label: "Practice tests",
+    label: "Practice",
     icon: (
       <svg {...ICON_PROPS}>
         <circle cx="12" cy="13" r="8" />
         <path d="M12 9v4l2.5 2.5" />
         <path d="M9 2h6" />
+      </svg>
+    ),
+  },
+  {
+    href: "/progress",
+    label: "Progress",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <path d="M3 3v16.5A1.5 1.5 0 0 0 4.5 21H21" />
+        <path d="m7 15 3.5-4 3 2.5L19 7" />
       </svg>
     ),
   },

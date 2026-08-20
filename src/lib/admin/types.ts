@@ -25,16 +25,61 @@ export type AdminQuestion = {
   setName: string | null;
 };
 
+/**
+ * A video as the admin sees it. Exactly one of the subtopic trio and the
+ * category pair is populated — the `videos_have_a_type` CHECK guarantees at
+ * least one, and the write path never sets both.
+ */
 export type AdminVideo = {
   id: string;
   title: string;
   youtubeId: string;
   description: string;
   isActive: boolean;
-  subtopicId: string;
-  subtopicName: string;
-  domainId: string;
+  subtopicId: string | null;
+  subtopicName: string | null;
+  domainId: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
 };
+
+export type AdminVideoCategory = {
+  id: string;
+  name: string;
+  slug: string;
+  isActive: boolean;
+  /** Videos currently filed under it, active and inactive alike. */
+  videoCount: number;
+};
+
+export type AdminPracticeTest = {
+  id: string;
+  title: string;
+  description: string | null;
+  difficulty: Difficulty;
+  testType: "full" | "half";
+  moduleCount: number;
+  isActive: boolean;
+  createdAt: string;
+  module1Count: number;
+  module2Count: number;
+  attemptCount: number;
+};
+
+/**
+ * The practice-test upload's form state.
+ *
+ * Unlike the question-set upload, which rejects bad ROWS and imports the rest,
+ * this is all-or-nothing: a test with 21 questions in module 1 is not a test.
+ * So the failure shape is a list of reasons and an import that did not happen.
+ */
+export type TestUploadState =
+  | { status: "idle" }
+  | { status: "error" | "rate_limited"; message: string }
+  | { status: "rejected"; errors: string[] }
+  | { status: "ok"; imported: number; reused: number; linked: number };
+
+export const initialTestUploadState: TestUploadState = { status: "idle" };
 
 export type AdminUserRow = {
   id: string;
@@ -49,6 +94,24 @@ export type QuestionSetOption = {
   id: string;
   name: string;
 };
+
+/**
+ * Where a video is filed, as the forms hold it. Mirrors the discriminated
+ * union in `SaveVideoSchema` so the client state and the server contract
+ * cannot drift into disagreeing about what "exactly one of these" means.
+ */
+export type VideoPlacement =
+  | { kind: "domain"; subtopicId: string }
+  | { kind: "category"; videoCategoryId: string };
+
+/**
+ * Creating a category returns the row, not just a status: the inline
+ * "new category" affordance on the video form has to select what it just
+ * made, and a bare `{ status: "ok" }` would force a refetch to find the id.
+ */
+export type CreateCategoryResult =
+  | { status: "ok"; id: string; name: string; slug: string }
+  | { status: "error" | "rate_limited"; message: string };
 
 /** What most admin write actions resolve to. */
 export type AdminActionResult =

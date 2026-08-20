@@ -43,8 +43,38 @@ const PROTECTED_PREFIXES = [
   "/videos",
   "/questions",
   "/practice",
+  "/progress",
+  "/settings",
+  "/onboarding",
+];
+
+/**
+ * The student surface the onboarding gate guards.
+ *
+ * Identical to PROTECTED_PREFIXES minus "/onboarding" itself, and the two
+ * lists are kept separate rather than derived from one another because the
+ * difference is the entire point: someone who has not onboarded must still be
+ * able to reach the wizard. Folding these together is how /onboarding ends up
+ * redirecting to itself.
+ *
+ * "/admin" is in neither list — it has its own branch below, and admins are
+ * exempt from onboarding entirely.
+ */
+const STUDENT_PREFIXES = [
+  "/dashboard",
+  "/videos",
+  "/questions",
+  "/practice",
+  "/progress",
   "/settings",
 ];
+
+/** Shared by both lists, so "/settings-other" never matches "/settings". */
+function matchesPrefix(pathname: string, prefixes: readonly string[]): boolean {
+  return prefixes.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
 
 export default async function proxy(request: NextRequest): Promise<NextResponse> {
   // Without project keys there is no session to refresh and nothing to guard.
@@ -82,13 +112,16 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
 
   const { pathname } = request.nextUrl;
 
-  if (
-    !user &&
-    PROTECTED_PREFIXES.some(
-      (prefix) =>
-        pathname === prefix || pathname.startsWith(`${prefix}/`),
-    )
-  ) {
+  /**
+   * `session_flags()` answers both routing questions in one round trip, and
+   * this memoises it so a request that consults the flags twice still makes
+   * one call. Net cost is unchanged from when this file called `is_admin()`.
+   */
+  let flags: SessionFlags | null = null;
+  const getFlags = async (): Promise<SessionFlags> =>
+    (flags ??= await loadSessionFlags(supabase));
+
+  if (!user && matchesPrefix(pathname, PROTECTED_PREFIXES)) {
     return withCookiesFrom(
       response,
       NextResponse.redirect(new URL("/auth/login", request.url)),
@@ -106,7 +139,7 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
         NextResponse.redirect(new URL("/auth/login", request.url)),
       );
     }
-    if (!(await isAdminSession(supabase))) {
+    if (!(await getFlags()).isAdmin) {
       return withCookiesFrom(
         response,
         NextResponse.redirect(new URL("/dashboard", request.url)),
@@ -114,12 +147,43 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
     }
   }
 
+  // The onboarding gate. Same caveat as every rule in this file: the `(app)`
+  // layout re-checks with `requireOnboarded()`, and `complete_onboarding()` in
+  // the database refuses a second write no matter what routes past here.
+  if (user) {
+    const { needsOnboarding } = await getFlags();
+
+    if (pathname === "/onboarding" || pathname.startsWith("/onboarding/")) {
+      // Finished, or exempt: the wizard is closed. This is the redirect people
+      // hit when they try to go back to it.
+      if (!needsOnboarding) {
+        return withCookiesFrom(
+          response,
+          NextResponse.redirect(new URL("/dashboard", request.url)),
+        );
+      }
+    } else if (needsOnboarding && matchesPrefix(pathname, STUDENT_PREFIXES)) {
+      return withCookiesFrom(
+        response,
+        NextResponse.redirect(new URL("/onboarding", request.url)),
+      );
+    }
+  }
+
   if (user && AUTH_FORM_PATHS.includes(pathname)) {
-    // Admins land on their panel, everyone else on the app.
-    if (await isAdminSession(supabase)) {
+    // Admins land on their panel, new students in the wizard, everyone else
+    // on the app.
+    const { isAdmin, needsOnboarding } = await getFlags();
+    if (isAdmin) {
       return withCookiesFrom(
         response,
         NextResponse.redirect(new URL("/admin", request.url)),
+      );
+    }
+    if (needsOnboarding) {
+      return withCookiesFrom(
+        response,
+        NextResponse.redirect(new URL("/onboarding", request.url)),
       );
     }
     return withCookiesFrom(response, NextResponse.redirect(APP_URL));
@@ -128,18 +192,40 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
   return response;
 }
 
+type SessionFlags = { isAdmin: boolean; needsOnboarding: boolean };
+
 /**
- * The database's `is_admin()` via the visitor's own session. Fails closed:
- * an RPC error reads as "not an admin", never the reverse.
+ * Both routing flags, from the database, via the visitor's own session.
+ *
+ * The two fields fail in OPPOSITE directions, which is deliberate:
+ *
+ *   - `isAdmin` fails closed. An RPC error reads as "not an admin", never the
+ *     reverse — the same rule `getIsAdmin()` follows.
+ *
+ *   - `needsOnboarding` fails OPEN. If it failed closed we would redirect to
+ *     /onboarding, whose page runs the same query, gets the same failure, and
+ *     redirects back: a loop that takes the whole app down over a transient
+ *     database blip. Waving someone through costs nothing, because
+ *     `complete_onboarding()` still refuses a second write.
  */
-async function isAdminSession(supabase: SupabaseClient): Promise<boolean> {
-  const { data, error } = await supabase.rpc("is_admin");
+async function loadSessionFlags(
+  supabase: SupabaseClient,
+): Promise<SessionFlags> {
+  const { data, error } = await supabase.rpc("session_flags").maybeSingle();
+
   if (error) {
-    console.error("[proxy] is_admin rpc failed", { error });
-    return false;
+    console.error("[proxy] session_flags rpc failed", { error });
+    return { isAdmin: false, needsOnboarding: false };
   }
-  return data === true;
+
+  const row = data as SessionFlagsRow | null;
+  return {
+    isAdmin: row?.is_admin === true,
+    needsOnboarding: row?.needs_onboarding === true,
+  };
 }
+
+type SessionFlagsRow = { is_admin: boolean; needs_onboarding: boolean };
 
 /**
  * Moves refreshed auth cookies onto a redirect response.
@@ -166,6 +252,11 @@ export const config = {
      * `/auth/callback` is intentionally inside the matcher: it is a normal
      * route and the exclusions below do not touch it. It never redirects here
      * because it is not in AUTH_FORM_PATHS and not under /dashboard.
+     *
+     * `/onboarding` and every STUDENT_PREFIXES entry are inside it too — none
+     * contains a dot and none sits under `_next/`, so the negative lookahead
+     * lets all of them through. Worth re-confirming by observation rather
+     * than by reading this regex whenever a prefix is added.
      */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
