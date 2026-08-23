@@ -61,12 +61,19 @@ const DEFAULT_WIDTH = 720;
 const DEFAULT_HEIGHT = 560;
 
 /**
- * Desmos's own embed view: the calculator without the surrounding site chrome.
+ * The full graphing calculator.
+ *
+ * Deliberately NOT `?embed`, which is what the site's own share dialog hands
+ * out. That flag loads a different bundle entirely — `calculator_embed.js`
+ * instead of `shared_calculator_desktop.js` — and it is a read-only preview of
+ * a saved graph: axes, no expression list, no keypad, and an "edit graph on
+ * desmos" link out. It exists to show a finished graph on a blog, not to be
+ * calculated in.
  *
  * No graph id, so every open starts blank — a previous question's working is
  * not something to carry into the next one.
  */
-const CALCULATOR_SRC = "https://www.desmos.com/calculator?embed";
+const CALCULATOR_SRC = "https://www.desmos.com/calculator";
 
 /**
  * What the embedded page is allowed to do.
