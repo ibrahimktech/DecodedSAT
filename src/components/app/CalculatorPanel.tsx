@@ -9,106 +9,82 @@
  * reasoning the real digital SAT applies when it gives you one for the whole
  * math section rather than per question.
  *
- * ## When there is no API key
+ * ## Why an iframe and not the JavaScript API
  *
- * `NEXT_PUBLIC_DESMOS_API_KEY` is empty until one is issued. In that state
- * this component renders `null` — no toggle button, no script tag, no failed
- * request, nothing in the console. Practice works exactly as it does today
- * and the calculator appears the moment the variable is set, with no code
- * change. That is deliberate: a half-loaded calculator that errors mid-test
- * would be worse than no calculator.
+ * This used to load `calculator.js` from Desmos with an API key and drive it
+ * through `Desmos.GraphingCalculator(element, options)`. That integration could
+ * not be made to work in production, for a reason that had nothing to do with
+ * the key: the bundle initialises with an unguarded top-level
  *
- * ## When there is a key and it still fails
+ *     const __dcg_shared_module_exports__ = eval(__dcg_shared_module_source__);
  *
- * A toggle button that opens onto "couldn't load" means the opposite problem:
- * the variable is set to something Desmos rejects. Desmos answers a bad key
- * with 403, which reaches this component as an indistinguishable script
- * `onerror`.
+ * and compiles expressions with `new Function(...)`. Both need `'unsafe-eval'`
+ * in this page's Content-Security-Policy. `next dev` grants that for React's
+ * own callstack reconstruction, so it worked locally and failed the moment
+ * NODE_ENV flipped — and granting it in production meant handing the two most
+ * content-heavy routes a policy barely stronger than none.
  *
- * The value is inlined into the client bundle at BUILD time, so it has two
- * ways to be wrong in a deployment that looks correctly configured: the
- * variable was added after the last build and no redeploy has happened since,
- * or it was pasted with surrounding quotes or trailing whitespace. Every one
- * of those is a 403, and none of them is a network problem — which is why the
- * copy below no longer suggests checking the connection.
+ * Embedding instead moves every one of those scripts into `desmos.com`'s
+ * origin, where they run under Desmos's CSP rather than ours. So this app needs
+ * no `'unsafe-eval'`, no `worker-src blob:`, no third-party `script-src`, and
+ * no API key — `frame-src` is the entire allowance. That is a better security
+ * position than the version that worked, not merely a workaround for one that
+ * did not.
  *
- * ## Where the dragging went
+ * ## What it costs
  *
- * The panel geometry — drag, resize, clamping, Escape — now lives in
- * `FloatingPanel`, shared with the reference sheet. What stays here is the part
- * that is actually about Desmos: loading its script once, mounting and
- * destroying the calculator, and telling it to re-measure after a gesture,
- * which it only ever does on demand.
+ * The API surface. There is no `GraphingCalculator(el, options)` any more, so:
+ *
+ * - `images: false` cannot be set. The real digital SAT does not offer image
+ *   upload; the embedded calculator does. Cosmetic, not a correctness problem.
+ * - `destroy()` is gone. Closing the panel unmounts the iframe, which is a
+ *   harder teardown than `destroy()` ever was.
+ * - `resize()` is gone, and unnecessary: an iframe reflows with its box, which
+ *   is why `FloatingPanel` is no longer handed an `onResized` callback.
+ *
+ * ## Dragging over an iframe
+ *
+ * An iframe swallows pointer events, which normally breaks drag-to-move the
+ * instant the cursor crosses it. `FloatingPanel` uses pointer capture rather
+ * than window listeners precisely so the events keep arriving anyway — that
+ * behaviour predates this change and is what makes the panel still draggable.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import {
   FloatingPanel,
   toolButtonClassName,
 } from "@/components/app/exam/FloatingPanel";
-import { DESMOS_API_KEY } from "@/lib/env";
 
 /** Enough room for the expression list and a usable graph beside it. */
 const DEFAULT_WIDTH = 720;
 const DEFAULT_HEIGHT = 560;
 
-/** The sliver of the Desmos API this component touches. */
-type DesmosCalculator = {
-  resize: () => void;
-  destroy: () => void;
-};
-
-type DesmosGlobal = {
-  GraphingCalculator: (
-    element: HTMLElement,
-    options?: Record<string, unknown>,
-  ) => DesmosCalculator;
-};
-
-declare global {
-  interface Window {
-    Desmos?: DesmosGlobal;
-  }
-}
+/**
+ * Desmos's own embed view: the calculator without the surrounding site chrome.
+ *
+ * No graph id, so every open starts blank — a previous question's working is
+ * not something to carry into the next one.
+ */
+const CALCULATOR_SRC = "https://www.desmos.com/calculator?embed";
 
 /**
- * One script tag per page, shared by every mount.
+ * What the embedded page is allowed to do.
  *
- * The panel unmounts on every question change; re-injecting the script each
- * time would re-download it and redefine the global. Holding the promise at
- * module scope makes the first mount pay for it and the rest await the same
- * result.
+ * Generous on purpose: Desmos needs scripts, its own origin (for the storage
+ * its expression list uses), modals for the settings menu, and downloads for
+ * image export. The directive that matters is the one NOT listed —
+ * `allow-top-navigation` — so nothing inside the frame can navigate a student
+ * out of a timed module.
  */
-let scriptPromise: Promise<DesmosGlobal> | null = null;
-
-function loadDesmos(): Promise<DesmosGlobal> {
-  if (scriptPromise) return scriptPromise;
-
-  scriptPromise = new Promise<DesmosGlobal>((resolve, reject) => {
-    if (window.Desmos) {
-      resolve(window.Desmos);
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = `https://www.desmos.com/api/v1.9/calculator.js?apiKey=${encodeURIComponent(
-      DESMOS_API_KEY,
-    )}`;
-    script.async = true;
-    script.onload = () => {
-      if (window.Desmos) resolve(window.Desmos);
-      else reject(new Error("Desmos loaded without defining its global"));
-    };
-    script.onerror = () => {
-      // Let a later mount retry rather than caching the failure forever.
-      scriptPromise = null;
-      reject(new Error("Desmos script failed to load"));
-    };
-    document.head.appendChild(script);
-  });
-
-  return scriptPromise;
-}
+const SANDBOX = [
+  "allow-scripts",
+  "allow-same-origin",
+  "allow-forms",
+  "allow-modals",
+  "allow-downloads",
+  "allow-popups",
+].join(" ");
 
 const CALCULATOR_ICON = (
   <svg
@@ -132,76 +108,24 @@ const CALCULATOR_ICON = (
 
 export function CalculatorPanel() {
   const [open, setOpen] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const calculatorRef = useRef<DesmosCalculator | null>(null);
-  const panelId = useId();
-
-  // --- Mount the calculator while the panel is open -------------------------
-  useEffect(() => {
-    if (!open) return;
-
-    let cancelled = false;
-
-    loadDesmos()
-      .then((Desmos) => {
-        if (cancelled || !hostRef.current || calculatorRef.current) return;
-        calculatorRef.current = Desmos.GraphingCalculator(hostRef.current, {
-          // Matches what the real digital SAT provides.
-          expressions: true,
-          keypad: true,
-          settingsMenu: true,
-          expressionsTopbar: true,
-          border: false,
-          autosize: true,
-          // Off for two reasons that happen to agree: the real digital SAT
-          // does not let students add images, and leaving it on would require
-          // `img-src blob:` in the CSP for a feature nobody here wants.
-          images: false,
-        });
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        // Logged as well as flagged. A script tag reports failure with no
-        // status attached, so this component genuinely cannot tell a rejected
-        // key from a blocked origin from an offline network — but the console
-        // can: a CSP violation names the directive at fault, and everything
-        // else shows up in the network panel as the 403 it is.
-        console.error(
-          "[calculator] Desmos failed to load. If the network panel shows 403 " +
-            "for calculator.js, NEXT_PUBLIC_DESMOS_API_KEY is being rejected — " +
-            "check for surrounding quotes or trailing whitespace in the value, " +
-            "and remember it is inlined at build time, so a newly added key " +
-            "needs a redeploy.",
-          error,
-        );
-        setFailed(true);
-      });
-
-    return () => {
-      cancelled = true;
-      calculatorRef.current?.destroy();
-      calculatorRef.current = null;
-    };
-  }, [open]);
-
-  const close = useCallback(() => setOpen(false), []);
-
   /**
-   * Desmos only re-lays-out on demand; without this the graph keeps whatever
-   * dimensions it had when the gesture started.
+   * Reset on every open. The iframe is unmounted when the panel closes, so a
+   * reopen genuinely reloads it and has to wait again — a `loaded` flag that
+   * survived the close would show an empty panel as though it were ready.
    */
-  const onResized = useCallback(() => calculatorRef.current?.resize(), []);
+  const [loaded, setLoaded] = useState(false);
 
-  // No key, no calculator, no trace of one.
-  if (DESMOS_API_KEY === "") return null;
+  const panelId = useId();
+  const close = useCallback(() => setOpen(false), []);
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen((wasOpen) => !wasOpen)}
+        onClick={() => {
+          setLoaded(false);
+          setOpen((wasOpen) => !wasOpen);
+        }}
         aria-expanded={open}
         aria-controls={panelId}
         className={toolButtonClassName(open)}
@@ -217,27 +141,26 @@ export function CalculatorPanel() {
         onClose={close}
         defaultWidth={DEFAULT_WIDTH}
         defaultHeight={DEFAULT_HEIGHT}
-        onResized={onResized}
       >
-        {failed ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-            <p className="text-[0.9375rem] text-ink">
-              The calculator couldn&apos;t load.
+        <div className="relative h-full">
+          {/* Sits behind the iframe and is covered by it once it paints, so
+              there is no swap and nothing shifts. If Desmos is unreachable this
+              is what stays on screen — honest about waiting rather than
+              claiming a failure the page cannot actually detect. */}
+          {!loaded && (
+            <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-[0.9375rem] text-muted">
+              Loading the calculator…
             </p>
-            <p className="text-sm text-muted">
-              Everything else still works — you can keep answering, and the
-              reference sheet is in the toolbar.
-            </p>
-            {process.env.NODE_ENV !== "production" && (
-              <p className="text-sm text-muted">
-                Developer note: check the console. A rejected API key (403) and
-                a blocked origin look identical from inside the page.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div ref={hostRef} className="h-full" />
-        )}
+          )}
+
+          <iframe
+            src={CALCULATOR_SRC}
+            title="Desmos graphing calculator"
+            sandbox={SANDBOX}
+            onLoad={() => setLoaded(true)}
+            className="relative h-full w-full border-0"
+          />
+        </div>
       </FloatingPanel>
     </>
   );

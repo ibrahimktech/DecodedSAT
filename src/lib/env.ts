@@ -59,25 +59,6 @@ export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 
-/**
- * Desmos's API key is public by design and belongs in the browser: it is a
- * domain-scoped identifier that gates nothing but which sites may embed the
- * calculator. It is the one and only new `NEXT_PUBLIC_` variable this step
- * adds, and unlike the Supabase service role key it protects nothing that
- * matters if it leaks — which is why it gets the prefix and that one never
- * will.
- *
- * Empty until a key exists. `<CalculatorPanel />` renders nothing at all in
- * that state: no script tag, no toggle button, no console noise. Adding the
- * key later is an environment change and no code change.
- */
-export const DESMOS_API_KEY = process.env.NEXT_PUBLIC_DESMOS_API_KEY || "";
-
-/** True once a Desmos key exists, so the calculator can be offered. */
-export function isDesmosConfigured(): boolean {
-  return DESMOS_API_KEY !== "";
-}
-
 /** False until real project keys are in `.env.local`. */
 export function isSupabaseConfigured(): boolean {
   return SUPABASE_URL !== "" && SUPABASE_ANON_KEY !== "";
