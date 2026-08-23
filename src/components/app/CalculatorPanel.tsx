@@ -18,6 +18,20 @@
  * change. That is deliberate: a half-loaded calculator that errors mid-test
  * would be worse than no calculator.
  *
+ * ## When there is a key and it still fails
+ *
+ * A toggle button that opens onto "couldn't load" means the opposite problem:
+ * the variable is set to something Desmos rejects. Desmos answers a bad key
+ * with 403, which reaches this component as an indistinguishable script
+ * `onerror`.
+ *
+ * The value is inlined into the client bundle at BUILD time, so it has two
+ * ways to be wrong in a deployment that looks correctly configured: the
+ * variable was added after the last build and no redeploy has happened since,
+ * or it was pasted with surrounding quotes or trailing whitespace. Every one
+ * of those is a 403, and none of them is a network problem — which is why the
+ * copy below no longer suggests checking the connection.
+ *
  * ## Where the dragging went
  *
  * The panel geometry — drag, resize, clamping, Escape — now lives in
@@ -149,12 +163,19 @@ export function CalculatorPanel() {
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        // Logged, not just flagged. The panel can only say "it didn't load",
-        // because from inside the page a blocked script and an offline network
-        // are indistinguishable — the console is where the difference actually
-        // shows up, as a Content-Security-Policy violation naming the
-        // directive at fault.
-        console.error("[calculator] Desmos failed to load", error);
+        // Logged as well as flagged. A script tag reports failure with no
+        // status attached, so this component genuinely cannot tell a rejected
+        // key from a blocked origin from an offline network — but the console
+        // can: a CSP violation names the directive at fault, and everything
+        // else shows up in the network panel as the 403 it is.
+        console.error(
+          "[calculator] Desmos failed to load. If the network panel shows 403 " +
+            "for calculator.js, NEXT_PUBLIC_DESMOS_API_KEY is being rejected — " +
+            "check for surrounding quotes or trailing whitespace in the value, " +
+            "and remember it is inlined at build time, so a newly added key " +
+            "needs a redeploy.",
+          error,
+        );
         setFailed(true);
       });
 
@@ -199,17 +220,21 @@ export function CalculatorPanel() {
         onResized={onResized}
       >
         {failed ? (
-          <p className="flex h-full items-center justify-center px-6 text-center text-[0.9375rem] text-muted">
-            The calculator couldn&apos;t load. Check your connection and reopen
-            it.
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+            <p className="text-[0.9375rem] text-ink">
+              The calculator couldn&apos;t load.
+            </p>
+            <p className="text-sm text-muted">
+              Everything else still works — you can keep answering, and the
+              reference sheet is in the toolbar.
+            </p>
             {process.env.NODE_ENV !== "production" && (
-              <>
-                {" "}
-                (Developer note: check the console — a blocked script looks
-                identical to a network failure from here.)
-              </>
+              <p className="text-sm text-muted">
+                Developer note: check the console. A rejected API key (403) and
+                a blocked origin look identical from inside the page.
+              </p>
             )}
-          </p>
+          </div>
         ) : (
           <div ref={hostRef} className="h-full" />
         )}
