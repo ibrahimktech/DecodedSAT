@@ -8,9 +8,11 @@
  * reaching into a form directory to find it.
  */
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { describeError } from "@/lib/auth/describe-error";
+import { ONBOARDED_COOKIE } from "@/lib/auth/onboarded-cookie";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function signOutAction(): Promise<void> {
@@ -24,6 +26,13 @@ export async function signOutAction(): Promise<void> {
     // person asked to leave, and the cookies are cleared either way.
     console.error(`[auth] sign-out failed: ${describeError(error)}`);
   }
+
+  // The onboarding latch belongs to the session that just ended. It is keyed
+  // to the user id, so leaving it would not actually mislead the next person
+  // to sign in here — but a cookie outliving the session it describes is the
+  // kind of thing that becomes a bug later, and a Server Action is one of the
+  // few places that can write cookies.
+  (await cookies()).delete(ONBOARDED_COOKIE);
 
   // Drops anything cached for the signed-in subtree. Not "/" — see the note in
   // `login/actions.ts`.

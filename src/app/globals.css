@@ -120,3 +120,61 @@
     scroll-margin-top: 7rem;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Nav rail pending hint.
+
+   Companion to `<NavPending />`. Every route under `(app)` is dynamic, so a
+   click whose destination has not finished prefetching still waits on the
+   server — this is the dot that confirms the click landed in that window.
+
+   Debounced by construction: it starts invisible and the fade-in is delayed,
+   so a navigation that completes quickly never flashes it. `visibility` holds
+   the box in the layout at all times, so appearing and disappearing shifts
+   nothing around it.
+--------------------------------------------------------------------------- */
+
+.nav-hint {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.nav-hint.is-pending {
+  visibility: visible;
+  animation-name: nav-hint-in, nav-hint-pulse;
+  animation-duration: 200ms, 1s;
+  /* Only surfaces if the navigation actually takes time. */
+  animation-delay: 100ms, 100ms;
+  animation-timing-function: ease, ease-in-out;
+  animation-iteration-count: 1, infinite;
+  animation-fill-mode: forwards, none;
+}
+
+@keyframes nav-hint-in {
+  to {
+    opacity: 0.55;
+  }
+}
+
+@keyframes nav-hint-pulse {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* A pulsing dot is precisely what this opts out of. The hint still appears —
+   it is feedback, not decoration — it simply holds still. */
+@media (prefers-reduced-motion: reduce) {
+  .nav-hint.is-pending {
+    animation-name: nav-hint-in;
+    animation-duration: 200ms;
+    animation-delay: 100ms;
+    animation-iteration-count: 1;
+    animation-fill-mode: forwards;
+  }
+}

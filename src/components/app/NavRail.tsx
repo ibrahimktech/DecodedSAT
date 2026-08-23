@@ -19,6 +19,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOutAction } from "@/app/auth/actions";
+import { NavPending } from "@/components/app/NavPending";
 import { FoxMascot } from "@/components/FoxMascot";
 
 type NavItem = {
@@ -139,6 +140,12 @@ export function NavRail() {
     >
       <span className="shrink-0">{item.icon}</span>
       <span className="hidden lg:inline">{item.label}</span>
+      {/* Must be inside the Link — `useLinkStatus` reads the nearest ancestor.
+          `ml-auto` parks it at the trailing edge; at rail width it is hidden
+          along with the label, where there is no room for it anyway. */}
+      <span className="ml-auto hidden lg:inline">
+        <NavPending />
+      </span>
     </Link>
   );
 

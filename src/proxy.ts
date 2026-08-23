@@ -26,6 +26,10 @@
 import { createServerClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  ONBOARDED_COOKIE,
+  ONBOARDED_COOKIE_OPTIONS,
+} from "@/lib/auth/onboarded-cookie";
 import { APP_URL, SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/env";
 import { AUTH_COOKIE_OPTIONS } from "@/lib/supabase/cookie-options";
 
@@ -147,22 +151,60 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
     }
   }
 
+  /**
+   * "Does this person still need the wizard?" — answered from a cookie once it
+   * has been answered from the database.
+   *
+   * This is the hot path. Without the short-circuit, every navigation in the
+   * signed-in app paid a `session_flags()` round trip to re-derive a one-way
+   * latch: `complete_onboarding()` sets the timestamp and nothing un-sets it,
+   * so once the answer is "no" it is "no" forever.
+   *
+   * Trusting the cookie is safe because it can only skip a redirect, and the
+   * redirect is a convenience — see `@/lib/auth/onboarded-cookie` for the full
+   * argument, and the header of this file for the three layers it rests on.
+   *
+   * The write happens after the await, never before: `getFlags()` can trigger
+   * a token refresh, and a refresh reassigns `response` out from under us.
+   */
+  const getNeedsOnboarding = async (): Promise<boolean> => {
+    if (user && request.cookies.get(ONBOARDED_COOKIE)?.value === user.id) {
+      return false;
+    }
+
+    const { needsOnboarding } = await getFlags();
+
+    if (needsOnboarding) {
+      // Covers the account that has not finished yet, and clears a value that
+      // no longer applies — a stale cookie from whoever used this browser last.
+      response.cookies.delete(ONBOARDED_COOKIE);
+    } else if (user) {
+      response.cookies.set(ONBOARDED_COOKIE, user.id, ONBOARDED_COOKIE_OPTIONS);
+    }
+
+    return needsOnboarding;
+  };
+
   // The onboarding gate. Same caveat as every rule in this file: the `(app)`
   // layout re-checks with `requireOnboarded()`, and `complete_onboarding()` in
   // the database refuses a second write no matter what routes past here.
+  // Asked only on the two kinds of path where the answer changes what happens.
+  // Anywhere else — the landing page, /admin, /auth/callback — the flag is not
+  // consulted, so it is not fetched either.
   if (user) {
-    const { needsOnboarding } = await getFlags();
-
     if (pathname === "/onboarding" || pathname.startsWith("/onboarding/")) {
       // Finished, or exempt: the wizard is closed. This is the redirect people
       // hit when they try to go back to it.
-      if (!needsOnboarding) {
+      if (!(await getNeedsOnboarding())) {
         return withCookiesFrom(
           response,
           NextResponse.redirect(new URL("/dashboard", request.url)),
         );
       }
-    } else if (needsOnboarding && matchesPrefix(pathname, STUDENT_PREFIXES)) {
+    } else if (
+      matchesPrefix(pathname, STUDENT_PREFIXES) &&
+      (await getNeedsOnboarding())
+    ) {
       return withCookiesFrom(
         response,
         NextResponse.redirect(new URL("/onboarding", request.url)),

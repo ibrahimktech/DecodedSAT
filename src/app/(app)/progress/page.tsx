@@ -31,12 +31,17 @@ export default async function ProgressPage() {
   // This page is not the question player and not a live test, so anything
   // still open is genuinely over. Closing first means the history below never
   // shows a row that is still changing.
-  await Promise.all([
+  //
+  // `getViewerTimeZone` rides along rather than following: it is a cookie read
+  // with no network behind it (see `@/lib/learn/viewer-timezone`), so there is
+  // nothing to gain by making it queue. The history read still comes after,
+  // because that is the ordering the paragraph above is about.
+  const [, , timeZone] = await Promise.all([
     finalizeOpenQuestionBankSessions(supabase),
     finalizeStalePracticeTestAttempts(supabase),
+    getViewerTimeZone(),
   ]);
 
-  const timeZone = await getViewerTimeZone();
   const days = await getProgressHistory(supabase, user.id, timeZone);
 
   return (
