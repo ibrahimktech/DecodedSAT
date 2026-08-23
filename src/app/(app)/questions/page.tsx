@@ -1,29 +1,33 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { QuestionPlayer } from "@/components/app/QuestionPlayer";
-import { CtaButton } from "@/components/CtaButton";
+import { TopicPicker } from "@/components/app/TopicPicker";
 import { requireUser } from "@/lib/auth/require-user";
 import {
   finalizeOpenQuestionBankSessions,
-  getDomainMastery,
-  getQuestionBatch,
-  getSubtopics,
-  suggestFocusDomain,
+  getDomains,
+  getSubtopicProgress,
 } from "@/lib/learn/data";
-import { QuestionFiltersSchema, type QuestionFilters } from "@/lib/learn/schemas";
-import { DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/learn/types";
+import { resolveSetSelection } from "@/lib/learn/question-sets";
+import { QuestionSetSchema } from "@/lib/learn/schemas";
+import type { Difficulty } from "@/lib/learn/types";
 
 export const metadata: Metadata = {
   title: "Question bank",
 };
 
 /**
- * Topic-filtered practice, one question at a time.
+ * The question bank's topic picker.
  *
- * Filtering is plain links over query params — server-rendered, no client
- * state to desync. `?start=1` switches from the picker to the player, whose
- * batch is chosen server-side (never-attempted questions first). Invalid
- * filter values are dropped by the schema, not echoed or "fixed".
+ * Server-renders the numbers — how many questions exist per subtopic, how many
+ * the student has answered, and how accurate they have been — and hands them to
+ * a client component that assembles a selection. See `TopicPicker` for why that
+ * one piece is client-side when the rest of this surface is plain links.
+ *
+ * The player lives at `/questions/practice`, in the `(exam)` route group,
+ * because it needs the opposite shell from this page: full-bleed, no nav rail.
+ *
+ * Query params are parsed here so a deep link — `?domain=algebra`, or the
+ * "Change topics" link back out of the player — arrives with its topics already
+ * ticked. Unknown slugs are dropped rather than erroring.
  */
 export default async function QuestionsPage({
   searchParams,
@@ -33,263 +37,52 @@ export default async function QuestionsPage({
   const { supabase, user } = await requireUser();
 
   const params = await searchParams;
-  const filters = QuestionFiltersSchema.parse({
-    domain: typeof params.domain === "string" ? params.domain : undefined,
-    subtopic: typeof params.subtopic === "string" ? params.subtopic : undefined,
-    difficulty:
-      typeof params.difficulty === "string" ? params.difficulty : undefined,
+  const parsed = QuestionSetSchema.parse({
+    domain: firstValue(params.domain),
+    subtopic: firstValue(params.subtopic),
+    difficulty: firstValue(params.difficulty),
+    shuffle: firstValue(params.shuffle),
   });
-  const started = params.start === "1";
 
-  const [subtopics, mastery] = await Promise.all([
-    getSubtopics(supabase),
-    getDomainMastery(supabase),
-  ]);
-  const domains = mastery.map((entry) => entry.domain);
-
-  // A subtopic deep-link implies its domain; a domain switch drops a subtopic
-  // that no longer belongs. Resolved once here so every chip link agrees.
-  const activeSubtopic = subtopics.find(
-    (subtopic) => subtopic.slug === filters.subtopic,
-  );
-  const activeDomain = activeSubtopic
-    ? domains.find((domain) => domain.id === activeSubtopic.domainId)
-    : domains.find((domain) => domain.slug === filters.domain);
-
-  const resolved: QuestionFilters = {
-    domain: activeDomain?.slug,
-    subtopic: activeSubtopic?.slug,
-    difficulty: filters.difficulty,
-  };
-
-  const focus = suggestFocusDomain(mastery);
-
-  if (started) {
-    const batch = await getQuestionBatch(supabase, user.id, resolved);
-    const pickerHref = buildHref(resolved);
-
-    return (
-      <div className="mx-auto max-w-3xl">
-        <PageHeader />
-        <p className="mt-6 flex flex-wrap items-center gap-2 text-[0.9375rem] text-muted">
-          <span>
-            Practicing:{" "}
-            <strong className="text-ink">
-              {activeSubtopic?.name ?? activeDomain?.name ?? "All domains"}
-            </strong>
-            {resolved.difficulty
-              ? ` · ${DIFFICULTY_LABELS[resolved.difficulty]}`
-              : ""}
-          </span>
-          <Link
-            href={pickerHref}
-            className="font-semibold text-accent transition-colors hover:text-accent-hover"
-          >
-            Change filters
-          </Link>
-        </p>
-
-        <div className="mt-4">
-          {batch.length === 0 ? (
-            <p className="rounded-2xl border border-hairline bg-surface p-8 text-center text-[0.9375rem] text-muted">
-              No questions match these filters yet.{" "}
-              <Link
-                href={pickerHref}
-                className="font-semibold text-accent transition-colors hover:text-accent-hover"
-              >
-                Loosen them
-              </Link>{" "}
-              and try again.
-            </p>
-          ) : (
-            // Keyed on the batch so "Practice more" (router.refresh) remounts
-            // the player when the server hands back a different set.
-            <QuestionPlayer
-              key={batch.map((question) => question.id).join(":")}
-              questions={batch}
-              changeFiltersHref={pickerHref}
-            />
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // The picker, not the player. Reaching it means any sitting that was open is
-  // genuinely over — including one whose tab was closed without finishing — so
-  // this is where dangling sessions get rolled up. Doing it in the player's
-  // branch instead would close the session the student is currently in.
+  // Reaching the picker means any sitting that was open is genuinely over —
+  // including one whose tab was closed without finishing — so this is where
+  // dangling sessions get rolled up. The player is a different route, which
+  // makes that unconditional: there is no branch of this page that could close
+  // the session a student is currently in.
   await finalizeOpenQuestionBankSessions(supabase);
+
+  const [domains, progress] = await Promise.all([
+    getDomains(supabase),
+    getSubtopicProgress(supabase, user.id),
+  ]);
+
+  // The picker works in subtopic slugs, so a `?domain=` deep link is expanded
+  // into its subtopics here — the same resolution the player does, from the
+  // same helper, so the two cannot disagree about what a link means.
+  const selection = resolveSetSelection(
+    domains,
+    progress.map((entry) => entry.subtopic),
+    {
+      domainSlugs: parsed.domain,
+      subtopicSlugs: parsed.subtopic,
+      difficulties: parsed.difficulty as Difficulty[],
+    },
+  );
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader />
-
-      {/* Adaptive suggestion — deliberately simple: lowest mastery first. */}
-      {focus && (
-        <section className="mt-6 rounded-2xl border border-insight-hairline bg-insight-surface p-5">
-          <h2 className="font-display text-lg font-bold text-ink">
-            Recommended for you
-          </h2>
-          <p className="mt-1 text-[0.9375rem] leading-relaxed text-muted">
-            {focus.accuracy !== null ? (
-              <>
-                <strong className="text-ink">{focus.domain.name}</strong> is
-                your lowest mastery right now ({focus.accuracy}% over recent
-                attempts) — start there.
-              </>
-            ) : (
-              <>
-                You haven&apos;t tried{" "}
-                <strong className="text-ink">{focus.domain.name}</strong> yet —
-                start there.
-              </>
-            )}
-          </p>
-          <div className="mt-3">
-            <CtaButton
-              href={buildHref({ domain: focus.domain.slug }, true)}
-              variant="secondary"
-            >
-              Practice {focus.domain.name}
-            </CtaButton>
-          </div>
-        </section>
-      )}
-
-      {/* Filter picker: three rows of chips, all plain links. */}
-      <section className="mt-6 rounded-2xl border border-hairline bg-surface p-6">
-        <h2 className="text-[0.9375rem] font-semibold text-muted">Domain</h2>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Chip
-            href={buildHref({ difficulty: resolved.difficulty })}
-            active={!activeDomain}
-          >
-            All domains
-          </Chip>
-          {domains.map((domain) => (
-            <Chip
-              key={domain.id}
-              href={buildHref({
-                domain: domain.slug,
-                difficulty: resolved.difficulty,
-              })}
-              active={activeDomain?.id === domain.id}
-            >
-              {domain.name}
-            </Chip>
-          ))}
-        </div>
-
-        {activeDomain && (
-          <>
-            <h2 className="mt-5 text-[0.9375rem] font-semibold text-muted">
-              Subtopic
-            </h2>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Chip
-                href={buildHref({
-                  domain: activeDomain.slug,
-                  difficulty: resolved.difficulty,
-                })}
-                active={!activeSubtopic}
-              >
-                All of {activeDomain.name}
-              </Chip>
-              {subtopics
-                .filter((subtopic) => subtopic.domainId === activeDomain.id)
-                .map((subtopic) => (
-                  <Chip
-                    key={subtopic.id}
-                    href={buildHref({
-                      domain: activeDomain.slug,
-                      subtopic: subtopic.slug,
-                      difficulty: resolved.difficulty,
-                    })}
-                    active={activeSubtopic?.id === subtopic.id}
-                  >
-                    {subtopic.name}
-                  </Chip>
-                ))}
-            </div>
-          </>
-        )}
-
-        <h2 className="mt-5 text-[0.9375rem] font-semibold text-muted">
-          Difficulty
-        </h2>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Chip
-            href={buildHref({ ...resolved, difficulty: undefined })}
-            active={!resolved.difficulty}
-          >
-            Any
-          </Chip>
-          {DIFFICULTIES.map((difficulty) => (
-            <Chip
-              key={difficulty}
-              href={buildHref({ ...resolved, difficulty })}
-              active={resolved.difficulty === difficulty}
-            >
-              {DIFFICULTY_LABELS[difficulty]}
-            </Chip>
-          ))}
-        </div>
-
-        <div className="mt-6">
-          <CtaButton href={buildHref(resolved, true)}>
-            Start practicing
-          </CtaButton>
-        </div>
-      </section>
+      <TopicPicker
+        domains={domains}
+        progress={progress}
+        initialSubtopicSlugs={selection.filters.subtopicSlugs}
+        initialDifficulties={selection.difficulties}
+        initialShuffle={parsed.shuffle === "1"}
+      />
     </div>
   );
 }
 
-function PageHeader() {
-  return (
-    <header>
-      <h1 className="font-display text-3xl font-extrabold text-ink sm:text-4xl">
-        Question bank
-      </h1>
-      <p className="mt-2 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">
-        Pick a topic and difficulty, answer one question at a time, and see the
-        explanation the moment you submit.
-      </p>
-    </header>
-  );
-}
-
-function buildHref(filters: QuestionFilters, start = false): string {
-  const params = new URLSearchParams();
-  if (filters.subtopic) params.set("subtopic", filters.subtopic);
-  if (filters.domain) params.set("domain", filters.domain);
-  if (filters.difficulty) params.set("difficulty", filters.difficulty);
-  if (start) params.set("start", "1");
-  const query = params.toString();
-  return query ? `/questions?${query}` : "/questions";
-}
-
-function Chip({
-  href,
-  active,
-  children,
-}: {
-  href: string;
-  active: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      aria-current={active ? "true" : undefined}
-      className={`rounded-xl border px-3.5 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
-        active
-          ? "border-transparent bg-accent text-surface"
-          : "border-hairline bg-surface text-muted hover:border-accent hover:text-accent"
-      }`}
-    >
-      {children}
-    </Link>
-  );
+/** A repeated query param is a client we did not write. Take the first. */
+function firstValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

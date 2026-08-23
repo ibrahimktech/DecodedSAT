@@ -43,7 +43,37 @@ export type PlayableQuestion = {
   /** For the "watch the explainer" callout after a miss. */
   subtopicSlug: string;
   subtopicHasVideo: boolean;
+  /**
+   * How this student did the last time they saw this question, or null if they
+   * never have.
+   *
+   * Reading it tells you nothing you could not learn by answering — it is this
+   * student's own history, not the answer key, and it says whether they were
+   * right rather than what the right answer was. `correct_choice` remains
+   * unreadable by this connection.
+   */
+  previousResult: "correct" | "incorrect" | null;
 };
+
+/**
+ * One question's place in a set, without its content.
+ *
+ * A set is now the whole filtered slice of the bank rather than a batch of ten,
+ * so shipping every prompt up front would mean a payload that grows with the
+ * question bank. The player gets this for every question — enough to draw the
+ * navigator, key the review flags, and say what happened last time — and pulls
+ * the prompts and choices in windows as the student moves.
+ *
+ * Roughly 40 bytes each, against roughly 300 for a full question.
+ */
+export type QuestionIndexEntry = {
+  id: string;
+  /** This student's own last result. Never the answer key. */
+  previousResult: "correct" | "incorrect" | null;
+};
+
+/** How many questions one window request carries. */
+export const QUESTION_WINDOW_SIZE = 25;
 
 /** What the grading action returns to the question player. */
 export type QuestionVerdict =

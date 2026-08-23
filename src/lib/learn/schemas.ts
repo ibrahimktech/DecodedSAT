@@ -10,6 +10,7 @@
 
 import { z } from "zod";
 import { PASSWORD_MAX, PASSWORD_MIN } from "@/lib/auth/schemas";
+import type { Difficulty } from "./types";
 
 const choiceField = z.number().int().min(0).max(3);
 
@@ -27,6 +28,17 @@ export const SubmitQuestionSchema = z.object({
    * forged id can misattribute nothing.
    */
   sessionId: z.uuid().nullable().catch(null),
+});
+
+/**
+ * One window of a practice set.
+ *
+ * Capped at twice the window size so a client that batches two adjacent windows
+ * still fits, and nothing larger does — the bound is what stops this becoming a
+ * "dump the bank" endpoint.
+ */
+export const LoadQuestionsSchema = z.object({
+  questionIds: z.array(z.uuid()).min(1).max(50),
 });
 
 /** Closing a sitting. The id is re-checked against the caller server-side. */
@@ -109,6 +121,88 @@ export const QuestionFiltersSchema = z.object({
 });
 
 export type QuestionFilters = z.infer<typeof QuestionFiltersSchema>;
+
+/**
+ * What defines a practice set: which questions, in what order.
+ *
+ * Standalone rather than an extension of `QuestionFiltersSchema`, because the
+ * two now disagree on the fundamentals. The video library filters to one
+ * subtopic at a time; a practice set is assembled from as many as the student
+ * wants — hard questions from two Algebra subtopics plus one from Geometry is
+ * a normal thing to want, and the single-value schema could not express it.
+ *
+ * Multi-values travel comma-separated (`?subtopic=slope,systems`), which keeps
+ * a shareable URL readable.
+ *
+ * ## Dropping, not repairing
+ *
+ * Same doctrine as the rest of this file, applied per item: a malformed slug in
+ * the list is dropped and the rest of the list stands. Failing the whole
+ * parameter over one bad entry would silently widen the set to everything,
+ * which is the more surprising outcome — and an empty list already means "no
+ * filter", so there is no value to invent.
+ */
+const SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
+
+/** At most this many values per parameter. Past it the URL is not a filter. */
+const MAX_LIST_VALUES = 100;
+
+function commaList(isValid: (value: string) => boolean) {
+  return z
+    .preprocess(
+      (raw) =>
+        typeof raw === "string"
+          ? raw
+              .split(",")
+              .map((value) => value.trim())
+              .filter((value) => value !== "" && isValid(value))
+              .slice(0, MAX_LIST_VALUES)
+          : [],
+      z.array(z.string()),
+    )
+    .catch([]);
+}
+
+const DIFFICULTY_VALUES = new Set(["easy", "medium", "hard"]);
+
+export const QuestionSetSchema = z.object({
+  /**
+   * Domain slugs. A domain selects every subtopic under it that is not already
+   * named individually — the picker resolves the two into one subtopic list
+   * before anything reaches the database.
+   */
+  domain: commaList((value) => SLUG_PATTERN.test(value)),
+  subtopic: commaList((value) => SLUG_PATTERN.test(value)),
+  difficulty: commaList((value) => DIFFICULTY_VALUES.has(value)),
+  /**
+   * A URL flag, so the only accepted value is the one that turns it on.
+   * `shuffle=true`, `shuffle=yes`, or a hand-edited `shuffle=0` all read as off
+   * rather than being coerced into something the sender did not write.
+   */
+  shuffle: z.literal("1").optional().catch(undefined),
+  /**
+   * Pins a shuffled order so it survives a reload.
+   *
+   * Without it, refreshing a shuffled set would deal a new order and lose the
+   * student's place in it. Any integer is a valid seed — there is nothing to
+   * validate beyond "is a number", and a hand-typed one is simply a different
+   * shuffle.
+   */
+  seed: z.coerce.number().int().min(0).max(2 ** 31).optional().catch(undefined),
+});
+
+export type QuestionSetParams = z.infer<typeof QuestionSetSchema>;
+
+/**
+ * A resolved set request: subtopic slugs already merged from the domain and
+ * subtopic parameters, difficulties normalised. This is what the data layer
+ * takes — it never sees a domain, because by then the question is only ever
+ * "which subtopics".
+ */
+export type QuestionSetFilters = {
+  subtopicSlugs: string[];
+  difficulties: Difficulty[];
+};
 
 /**
  * The video library adds a free-text title search on top of the shared

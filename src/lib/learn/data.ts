@@ -22,9 +22,10 @@ import type {
   Domain,
   PlayableQuestion,
   PracticeQuestion,
+  QuestionIndexEntry,
   Subtopic,
 } from "./types";
-import type { QuestionFilters } from "./schemas";
+import type { QuestionSetFilters } from "./schemas";
 
 /** Logs a query failure without letting provider detail reach the page. */
 function logQueryError(label: string, error: unknown): void {
@@ -321,8 +322,8 @@ export async function getTodayAttemptCount(
  * over, so there is no risk of closing a session out from under someone who
  * is still answering.
  *
- * Deliberately not called from the player's own route with `?start=1`, and
- * deliberately not called from a layout — a layout runs on the player too.
+ * Deliberately not called from the player's own route (`/questions/practice`),
+ * and deliberately not called from a layout — a layout runs on the player too.
  */
 export async function finalizeOpenQuestionBankSessions(
   supabase: SupabaseClient,
@@ -595,47 +596,211 @@ export async function getVideo(
 // --- Question bank -----------------------------------------------------------
 
 /**
- * Picks the next batch of questions for the player. Never-attempted questions
- * come first; once everything has been seen, the least-recently-attempted
- * rotate back in. The rows shipped to the client carry no answer key — that
- * column is not even readable by this connection (see the migration's column
- * grant); verdicts come from the grading RPC at submit time.
+ * PostgREST caps a single response, so anything that must read a whole table
+ * slice pages through it. 5,000 is the ceiling on one filtered set — past that
+ * the student is not choosing a set, they are choosing the bank.
  */
-export async function getQuestionBatch(
+const PAGE_SIZE = 1000;
+const MAX_SET_SIZE = 5000;
+
+/**
+ * Resolves a set request to the ordered list of questions in it.
+ *
+ * A set used to be ten questions. It is now every question matching the
+ * filters, in a fixed order, and the player pages through it — so what this
+ * returns is an index, not content: one id and one past result per question,
+ * roughly forty bytes each. `getQuestionsByIds` fills in prompts and choices as
+ * the student actually reaches them.
+ *
+ * ## Ordering
+ *
+ * Two orderings, both fully determined before anything is shipped.
+ *
+ * By default it rotates: never-attempted questions first, then the
+ * least-recently-attempted. That is the right default for study — it stops a
+ * student re-drilling the questions they already know. Ties break on id, so the
+ * order is stable rather than whatever Postgres happened to return.
+ *
+ * With `shuffle`, a seeded shuffle instead. The seed lives in the URL precisely
+ * so that reloading deals the same order: an unseeded shuffle would reshuffle
+ * on every refresh and lose the student's place in their own set.
+ *
+ * Note that the rotation order is computed once, here. It deliberately does not
+ * re-sort as the student answers — a set that reordered itself underneath
+ * someone mid-session would be unusable.
+ *
+ * Nothing here can leak an answer key: `correct_choice` and `explanation` are
+ * not readable by this connection at all, and what each entry does carry is the
+ * student's own past result — whether they were right, never what right was.
+ */
+export async function getQuestionSetIndex(
   supabase: SupabaseClient,
   userId: string,
-  filters: QuestionFilters,
-  batchSize = 10,
-): Promise<PlayableQuestion[]> {
-  let query = supabase
-    .from("questions")
-    .select(
-      "id, prompt, choices, difficulty, subtopics!inner(id, name, slug, domain_id)",
-    )
-    // Soft-deleted questions never enter a batch; past attempts on them keep
-    // counting for streak/mastery, which read attempts, not questions.
-    .eq("is_active", true)
-    .limit(60);
+  filters: QuestionSetFilters,
+  options: { shuffle?: boolean; seed?: number } = {},
+): Promise<QuestionIndexEntry[]> {
+  const ids = await fetchMatchingQuestionIds(supabase, filters);
+  if (ids.length === 0) return [];
 
-  if (filters.difficulty) query = query.eq("difficulty", filters.difficulty);
+  const { lastAttemptAt, lastResult } = await fetchAttemptHistory(
+    supabase,
+    userId,
+    ids,
+  );
 
-  // A subtopic filter implies its domain; when both arrive the subtopic wins.
-  if (filters.subtopic) {
-    query = query.eq("subtopics.slug", filters.subtopic);
-  } else if (filters.domain) {
-    const domains = await getDomains(supabase);
-    const domain = domains.find((entry) => entry.slug === filters.domain);
-    if (!domain) return [];
-    query = query.eq("subtopics.domain_id", domain.id);
+  const ordered = options.shuffle
+    ? seededShuffle(ids, options.seed ?? 0)
+    : [...ids].sort((a, b) => {
+        const lastA = lastAttemptAt.get(a) ?? 0; // 0 = never attempted → first
+        const lastB = lastAttemptAt.get(b) ?? 0;
+        if (lastA !== lastB) return lastA - lastB;
+        // Ties on id so two never-attempted questions keep a stable order
+        // between the index and any later read.
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+
+  return ordered.map((id) => {
+    const previous = lastResult.get(id);
+    return {
+      id,
+      previousResult:
+        previous === undefined ? null : previous ? "correct" : "incorrect",
+    };
+  });
+}
+
+/**
+ * The ids matching a set's filters, paged past PostgREST's response cap.
+ *
+ * Selects nothing but the id and the subtopic it filters on — the whole point
+ * of splitting index from content is that this stays cheap even when it matches
+ * the entire bank.
+ */
+async function fetchMatchingQuestionIds(
+  supabase: SupabaseClient,
+  filters: QuestionSetFilters,
+): Promise<string[]> {
+  const ids: string[] = [];
+
+  for (let from = 0; from < MAX_SET_SIZE; from += PAGE_SIZE) {
+    let query = supabase
+      .from("questions")
+      .select("id, subtopics!inner(slug)")
+      // Soft-deleted questions never enter a set; past attempts on them keep
+      // counting for streak/mastery, which read attempts, not questions.
+      .eq("is_active", true)
+      .order("id")
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (filters.difficulties.length > 0) {
+      query = query.in("difficulty", filters.difficulties);
+    }
+    if (filters.subtopicSlugs.length > 0) {
+      query = query.in("subtopics.slug", filters.subtopicSlugs);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      logQueryError("question_set_ids", error);
+      break;
+    }
+
+    const page = (data ?? []) as Array<{ id: string }>;
+    ids.push(...page.map((row) => row.id));
+    if (page.length < PAGE_SIZE) break;
   }
 
-  const { data, error } = await query;
+  return ids;
+}
+
+/** Most recent attempt per question, for ordering and for "seen before". */
+async function fetchAttemptHistory(
+  supabase: SupabaseClient,
+  userId: string,
+  questionIds: string[],
+): Promise<{
+  lastAttemptAt: Map<string, number>;
+  lastResult: Map<string, boolean>;
+}> {
+  const lastAttemptAt = new Map<string, number>();
+  const lastResult = new Map<string, boolean>();
+
+  // `.in()` on thousands of ids makes a URL no proxy will accept, so this asks
+  // for the student's own recent attempts and keeps the ones that matter.
+  // Their history is theirs — RLS scopes the table to them either way.
+  const wanted = new Set(questionIds);
+
+  for (let from = 0; from < MAX_SET_SIZE; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("question_attempts")
+      .select("question_id, attempted_at, is_correct")
+      .eq("user_id", userId)
+      .order("attempted_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      logQueryError("question_set_attempts", error);
+      break;
+    }
+
+    const page = (data ?? []) as Array<{
+      question_id: string;
+      attempted_at: string;
+      is_correct: boolean;
+    }>;
+
+    for (const attempt of page) {
+      // Rows arrive newest-first, so the first sighting of a question id is its
+      // most recent attempt and every later one is history.
+      if (!wanted.has(attempt.question_id)) continue;
+      if (lastAttemptAt.has(attempt.question_id)) continue;
+      lastAttemptAt.set(
+        attempt.question_id,
+        new Date(attempt.attempted_at).getTime(),
+      );
+      lastResult.set(attempt.question_id, attempt.is_correct);
+    }
+
+    if (page.length < PAGE_SIZE) break;
+    // Everything in the set is accounted for; older attempts cannot change it.
+    if (lastAttemptAt.size === wanted.size) break;
+  }
+
+  return { lastAttemptAt, lastResult };
+}
+
+/**
+ * Full content for one window of a set.
+ *
+ * The ids come from the client, which got them from an index this server built
+ * — so they are worth validating (the action does) but not worth distrusting:
+ * every row returned is one the caller could have reached by paging, and the
+ * answer key is unreadable on this connection regardless.
+ *
+ * Returns rows in the order the ids were asked for, so a window lands in the
+ * player already lined up with the index.
+ */
+export async function getQuestionsByIds(
+  supabase: SupabaseClient,
+  userId: string,
+  questionIds: string[],
+): Promise<PlayableQuestion[]> {
+  if (questionIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("questions")
+    .select(
+      "id, prompt, choices, difficulty, subtopics!inner(id, name, slug)",
+    )
+    .eq("is_active", true)
+    .in("id", questionIds);
+
   if (error) {
-    logQueryError("question_batch", error);
+    logQueryError("questions_by_id", error);
     return [];
   }
 
-  const candidates = ((data ?? []) as unknown as Array<{
+  const rows = ((data ?? []) as unknown as Array<{
     id: string;
     prompt: string;
     choices: unknown;
@@ -643,68 +808,293 @@ export async function getQuestionBatch(
     subtopics: { id: string; name: string; slug: string };
   }>).filter((row) => toChoices(row.choices).length === 4);
 
-  if (candidates.length === 0) return [];
+  if (rows.length === 0) return [];
 
-  // Most recent attempt per candidate question, to drive the rotation.
-  const lastAttemptAt = new Map<string, number>();
-  const { data: attempts, error: attemptsError } = await supabase
-    .from("question_attempts")
-    .select("question_id, attempted_at")
-    .eq("user_id", userId)
-    .in(
-      "question_id",
-      candidates.map((row) => row.id),
-    )
-    .order("attempted_at", { ascending: false })
-    .limit(1000);
+  const [{ lastResult }, subtopicsWithVideo] = await Promise.all([
+    fetchAttemptHistory(
+      supabase,
+      userId,
+      rows.map((row) => row.id),
+    ),
+    subtopicsWithVideoFor(
+      supabase,
+      rows.map((row) => row.subtopics.id),
+    ),
+  ]);
 
-  if (attemptsError) logQueryError("question_batch_attempts", attemptsError);
+  const byId = new Map(
+    rows.map((row) => {
+      const previous = lastResult.get(row.id);
+      return [
+        row.id,
+        {
+          id: row.id,
+          prompt: row.prompt,
+          choices: toChoices(row.choices),
+          difficulty: row.difficulty,
+          subtopicName: row.subtopics.name,
+          subtopicSlug: row.subtopics.slug,
+          subtopicHasVideo: subtopicsWithVideo.has(row.subtopics.id),
+          previousResult:
+            previous === undefined
+              ? null
+              : previous
+                ? ("correct" as const)
+                : ("incorrect" as const),
+        } satisfies PlayableQuestion,
+      ];
+    }),
+  );
 
-  for (const attempt of (attempts ?? []) as Array<{
-    question_id: string;
-    attempted_at: string;
-  }>) {
-    if (!lastAttemptAt.has(attempt.question_id)) {
-      lastAttemptAt.set(
-        attempt.question_id,
-        new Date(attempt.attempted_at).getTime(),
-      );
-    }
-  }
+  return questionIds
+    .map((id) => byId.get(id))
+    .filter((question): question is PlayableQuestion => question !== undefined);
+}
 
-  const ordered = [...candidates].sort((a, b) => {
-    const lastA = lastAttemptAt.get(a.id) ?? 0; // 0 = never attempted → first
-    const lastB = lastAttemptAt.get(b.id) ?? 0;
-    return lastA - lastB;
-  });
+/** Which of these subtopics have an explainer to link to after a miss. */
+async function subtopicsWithVideoFor(
+  supabase: SupabaseClient,
+  subtopicIds: string[],
+): Promise<Set<string>> {
+  const unique = [...new Set(subtopicIds)];
+  if (unique.length === 0) return new Set();
 
-  const batch = ordered.slice(0, batchSize);
-
-  // Which of the batch's subtopics have an explainer to link to after a miss.
-  const subtopicIds = [...new Set(batch.map((row) => row.subtopics.id))];
-  const { data: videoRows, error: videoError } = await supabase
+  const { data, error } = await supabase
     .from("videos")
     .select("subtopic_id")
     .eq("is_active", true)
-    .in("subtopic_id", subtopicIds);
+    .in("subtopic_id", unique);
 
-  if (videoError) logQueryError("question_batch_videos", videoError);
+  if (error) {
+    logQueryError("question_videos", error);
+    return new Set();
+  }
 
-  const subtopicsWithVideo = new Set(
-    ((videoRows ?? []) as Array<{ subtopic_id: string }>).map(
+  return new Set(
+    ((data ?? []) as Array<{ subtopic_id: string }>).map(
       (row) => row.subtopic_id,
     ),
   );
+}
 
-  return batch.map((row) => ({
-    id: row.id,
-    prompt: row.prompt,
-    choices: toChoices(row.choices),
-    difficulty: row.difficulty,
-    subtopicName: row.subtopics.name,
-    subtopicSlug: row.subtopics.slug,
-    subtopicHasVideo: subtopicsWithVideo.has(row.subtopics.id),
-  }));
+export type CoverageCount = { total: number; answered: number };
+
+export type SubtopicProgress = {
+  subtopic: Subtopic;
+  /** Active questions in the bank for this subtopic. */
+  total: number;
+  /** Distinct questions the student has answered at least once. */
+  answered: number;
+  /** Correct attempts over all attempts, or null with no attempts yet. */
+  accuracy: number | null;
+  /**
+   * The same two counts split by difficulty.
+   *
+   * The picker filters by difficulty, and a row still reading "22 of 159" after
+   * the student narrowed to hard questions would be quietly wrong about the set
+   * they are about to start. Same scan, one more column.
+   */
+  byDifficulty: Record<Difficulty, CoverageCount>;
+};
+
+function emptyByDifficulty(): Record<Difficulty, CoverageCount> {
+  return {
+    easy: { total: 0, answered: 0 },
+    medium: { total: 0, answered: 0 },
+    hard: { total: 0, answered: 0 },
+  };
+}
+
+/**
+ * Per-subtopic coverage and accuracy, for the topic picker.
+ *
+ * Two different numbers, deliberately. Coverage counts DISTINCT questions
+ * answered against how many exist — "22 of 159" is how much of this topic you
+ * have actually met. Accuracy counts correct attempts over all attempts, which
+ * includes the repeats coverage ignores, because getting a question right on
+ * the third go is not the same as getting it right first time.
+ *
+ * Computed here rather than in a new SQL function: the `domain_mastery` RPC
+ * next door answers a different question (a recent-attempts window per domain),
+ * and both tables this reads are already scoped to the caller by RLS. A
+ * migration would buy nothing that two indexed reads do not.
+ */
+export async function getSubtopicProgress(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<SubtopicProgress[]> {
+  const [subtopics, questionRows, attemptRows] = await Promise.all([
+    getSubtopics(supabase),
+    fetchAllActiveQuestionSubtopics(supabase),
+    fetchAllAttempts(supabase, userId),
+  ]);
+
+  const totals = new Map<string, number>();
+  const byDifficulty = new Map<string, Record<Difficulty, CoverageCount>>();
+  const questionMeta = new Map<
+    string,
+    { subtopicId: string; difficulty: Difficulty }
+  >();
+
+  for (const row of questionRows) {
+    totals.set(row.subtopicId, (totals.get(row.subtopicId) ?? 0) + 1);
+    questionMeta.set(row.id, {
+      subtopicId: row.subtopicId,
+      difficulty: row.difficulty,
+    });
+
+    let split = byDifficulty.get(row.subtopicId);
+    if (!split) {
+      split = emptyByDifficulty();
+      byDifficulty.set(row.subtopicId, split);
+    }
+    split[row.difficulty].total += 1;
+  }
+
+  const answeredQuestions = new Map<string, Set<string>>();
+  const attempts = new Map<string, { total: number; correct: number }>();
+
+  for (const attempt of attemptRows) {
+    const meta = questionMeta.get(attempt.questionId);
+    // An attempt on a since-deactivated question still counts for streak and
+    // mastery elsewhere, but it has no place in a coverage table that is about
+    // what is currently in the bank.
+    if (!meta) continue;
+
+    let seen = answeredQuestions.get(meta.subtopicId);
+    if (!seen) {
+      seen = new Set();
+      answeredQuestions.set(meta.subtopicId, seen);
+    }
+    // Distinct questions, so the per-difficulty tally only moves the first time
+    // a given question is answered.
+    if (!seen.has(attempt.questionId)) {
+      seen.add(attempt.questionId);
+      const split = byDifficulty.get(meta.subtopicId);
+      if (split) split[meta.difficulty].answered += 1;
+    }
+
+    const tally = attempts.get(meta.subtopicId) ?? { total: 0, correct: 0 };
+    tally.total += 1;
+    if (attempt.isCorrect) tally.correct += 1;
+    attempts.set(meta.subtopicId, tally);
+  }
+
+  return subtopics.map((subtopic) => {
+    const tally = attempts.get(subtopic.id);
+    return {
+      subtopic,
+      total: totals.get(subtopic.id) ?? 0,
+      answered: answeredQuestions.get(subtopic.id)?.size ?? 0,
+      accuracy:
+        tally && tally.total > 0
+          ? Math.round((tally.correct / tally.total) * 100)
+          : null,
+      byDifficulty: byDifficulty.get(subtopic.id) ?? emptyByDifficulty(),
+    };
+  });
+}
+
+async function fetchAllActiveQuestionSubtopics(
+  supabase: SupabaseClient,
+): Promise<Array<{ id: string; subtopicId: string; difficulty: Difficulty }>> {
+  const rows: Array<{
+    id: string;
+    subtopicId: string;
+    difficulty: Difficulty;
+  }> = [];
+
+  for (let from = 0; from < MAX_SET_SIZE; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("questions")
+      .select("id, subtopic_id, difficulty")
+      .eq("is_active", true)
+      .order("id")
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      logQueryError("question_subtopics", error);
+      break;
+    }
+
+    const page = (data ?? []) as Array<{
+      id: string;
+      subtopic_id: string;
+      difficulty: Difficulty;
+    }>;
+    rows.push(
+      ...page.map((row) => ({
+        id: row.id,
+        subtopicId: row.subtopic_id,
+        difficulty: row.difficulty,
+      })),
+    );
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+async function fetchAllAttempts(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<Array<{ questionId: string; isCorrect: boolean }>> {
+  const rows: Array<{ questionId: string; isCorrect: boolean }> = [];
+
+  for (let from = 0; from < MAX_SET_SIZE; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("question_attempts")
+      .select("question_id, is_correct")
+      .eq("user_id", userId)
+      .order("attempted_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      logQueryError("all_attempts", error);
+      break;
+    }
+
+    const page = (data ?? []) as Array<{
+      question_id: string;
+      is_correct: boolean;
+    }>;
+    rows.push(
+      ...page.map((row) => ({
+        questionId: row.question_id,
+        isCorrect: row.is_correct,
+      })),
+    );
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+/**
+ * Deterministic Fisher-Yates.
+ *
+ * `Math.random()` cannot be used here: the same seed has to produce the same
+ * order on the page load and on every reload, or a shuffled set would deal
+ * itself again each time the student refreshed. mulberry32 is four lines and
+ * ample — this decides what order practice questions appear in, and nothing is
+ * being drawn for or defended.
+ */
+function seededShuffle<T>(items: readonly T[], seed: number): T[] {
+  let state = (seed || 1) >>> 0;
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(random() * (index + 1));
+    [copy[index], copy[swap]] = [copy[swap], copy[index]];
+  }
+  return copy;
 }
 
 // --- Practice tests ----------------------------------------------------------

@@ -32,7 +32,28 @@ export const metadata: Metadata = {
 export default async function DashboardPage() {
   const { supabase, user } = await requireUser();
 
-  const profile = await getProfile(supabase, user.id);
+  // One wave, not three.
+  //
+  // `getProfile` does not depend on the finalize calls, and `getViewerTimeZone`
+  // is a cookie read that touches no network at all, so making either wait on
+  // the other two was latency for nothing on every single dashboard load.
+  //
+  // The ordering that DOES matter is between this wave and the next: the
+  // finalize calls have to land before the counts are read, or today's goal and
+  // the heatmap stop agreeing with the Progress page. That constraint sits at
+  // the `await` below, not inside this group.
+  //
+  // Running the finalize calls for an account with no profile row (the early
+  // return underneath) is harmless — they close the caller's own open rows, of
+  // which such an account has none.
+  const [profile, timeZone] = await Promise.all([
+    getProfile(supabase, user.id),
+    getViewerTimeZone(),
+    // The dashboard is neither the question player nor a live test, so anything
+    // still open is over.
+    finalizeOpenQuestionBankSessions(supabase),
+    finalizeStalePracticeTestAttempts(supabase),
+  ]);
 
   // No profile row means the confirmation trigger has not fired for this
   // account — the "not a real user until verified" state from the migration.
@@ -49,16 +70,6 @@ export default async function DashboardPage() {
       </div>
     );
   }
-
-  // The dashboard is neither the question player nor a live test, so anything
-  // still open is over. Closing before the counts are read is what keeps
-  // today's goal and the heatmap agreeing with the Progress page.
-  await Promise.all([
-    finalizeOpenQuestionBankSessions(supabase),
-    finalizeStalePracticeTestAttempts(supabase),
-  ]);
-
-  const timeZone = await getViewerTimeZone();
 
   const [stats, streak, todayCount, mastery, continueTarget, activity] =
     await Promise.all([
@@ -224,7 +235,7 @@ export default async function DashboardPage() {
               <strong className="text-ink">{continueTarget.subtopicName}</strong>.
             </p>
             <CtaButton
-              href={`/questions?subtopic=${continueTarget.subtopicSlug}&start=1`}
+              href={`/questions/practice?subtopic=${continueTarget.subtopicSlug}`}
             >
               Keep practicing
             </CtaButton>

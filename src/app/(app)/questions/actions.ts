@@ -19,8 +19,13 @@
 
 import { describeError } from "@/lib/auth/describe-error";
 import { GENERIC_ERROR_MESSAGE, rateLimitedMessage } from "@/lib/auth/state";
-import { CloseSessionSchema, SubmitQuestionSchema } from "@/lib/learn/schemas";
-import type { QuestionVerdict } from "@/lib/learn/types";
+import { getQuestionsByIds } from "@/lib/learn/data";
+import {
+  CloseSessionSchema,
+  LoadQuestionsSchema,
+  SubmitQuestionSchema,
+} from "@/lib/learn/schemas";
+import type { PlayableQuestion, QuestionVerdict } from "@/lib/learn/types";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -45,6 +50,72 @@ const sessionLimiter = createRateLimiter({
   windowMs: 60_000,
   prefix: "question-session",
 });
+
+/**
+ * Window loads.
+ *
+ * A set is now the whole filtered slice of the bank, paged in twenty-five
+ * questions at a time as the student navigates. Someone jumping around the
+ * navigator can pull several windows in quick succession, so this is loose
+ * enough to feel instant and still bounded: 60 windows a minute is 1,500
+ * questions, well past anything a person reads.
+ */
+const windowLimiter = createRateLimiter({
+  limit: 60,
+  windowMs: 60_000,
+  prefix: "question-window",
+});
+
+export type LoadQuestionsResult =
+  | { status: "ok"; questions: PlayableQuestion[] }
+  | { status: "error" | "rate_limited"; message: string };
+
+/**
+ * Fetches full content for one window of a set.
+ *
+ * The ids come from an index this server built for this caller, so the
+ * interesting question is not whether they are trustworthy but whether they are
+ * well-formed and bounded — which the schema settles. Everything past that is
+ * already enforced underneath: RLS scopes the read, and `correct_choice` and
+ * `explanation` are unreadable on this connection, so a forged id buys a
+ * prompt at most and an answer key never.
+ */
+export async function loadQuestionsAction(
+  input: unknown,
+): Promise<LoadQuestionsResult> {
+  try {
+    const supabase = await createSupabaseServerClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+
+    const rate = await windowLimiter.check(user.id);
+    if (!rate.ok) {
+      return {
+        status: "rate_limited",
+        message: rateLimitedMessage(rate.retryAfterSeconds),
+      };
+    }
+
+    const parsed = LoadQuestionsSchema.safeParse(input);
+    if (!parsed.success) {
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
+
+    const questions = await getQuestionsByIds(
+      supabase,
+      user.id,
+      parsed.data.questionIds,
+    );
+
+    return { status: "ok", questions };
+  } catch (error) {
+    console.error(`[questions] window load threw: ${describeError(error)}`);
+    return { status: "error", message: GENERIC_ERROR_MESSAGE };
+  }
+}
 
 export async function submitQuestionAttemptAction(
   input: unknown,
@@ -109,7 +180,7 @@ export async function submitQuestionAttemptAction(
  * Opens a question bank sitting and returns its id.
  *
  * Called by the player on mount, not by the page on render. That distinction
- * matters: `/questions?start=1` is a prefetch target, and a session created by
+ * matters: `/questions/practice` is a prefetch target, and a session created by
  * a link hover would show up on Progress as a sitting that never happened.
  *
  * Returns null on any failure. The player treats that as "practice without a

@@ -3,10 +3,12 @@
 /**
  * Taking a full or half practice test.
  *
- * Mirrors the real digital SAT: one question at a time, a navigator strip
- * across every question in the module, a strict countdown, and — on a full
- * test — a Continue screen between the two modules whose clock does not start
- * until it is pressed.
+ * Mirrors the real digital SAT: full-bleed with no site navigation, one
+ * question at a time, the clock centred at the top with a Hide control, the
+ * calculator and reference sheet as floating tools, a navigator behind the
+ * question counter, a strict countdown, and — on a full test — a Continue
+ * screen between the two modules whose clock does not start until it is
+ * pressed.
  *
  * ## What this component is NOT trusted with
  *
@@ -15,6 +17,10 @@
  * is handed and reports choices. `deadlineMs` is a server timestamp used to
  * draw a clock, not to enforce one — `save_practice_test_response()` refuses
  * a late answer whatever this component believes the time is.
+ *
+ * This is also why the timer can be hidden but not paused. Hiding is a fact
+ * about this component; pausing would be a claim about the attempt, and the
+ * attempt's clock is not this component's to move.
  *
  * ## Why the timer running out and pressing Submit are the same call
  *
@@ -29,6 +35,10 @@
  * that nudges the server-side sweep — but the guarantee comes from the sweep
  * itself, which runs on the next page load and finalizes any attempt whose
  * module deadline has passed. A tab killed instantly still scores correctly.
+ *
+ * Review marks and crossed-out choices are the one thing here that is neither
+ * server state nor React state: they live in `sessionStorage` so a refresh
+ * mid-module does not wipe a student's working notes. See `@/lib/learn/exam-flags`.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -40,16 +50,23 @@ import {
 } from "@/app/(app)/practice/tests/actions";
 import { CalculatorPanel } from "@/components/app/CalculatorPanel";
 import { MathText } from "@/components/app/MathText";
+import { ChoiceList } from "@/components/app/exam/ChoiceList";
+import { ExamShell, examButtonClassName } from "@/components/app/exam/ExamShell";
+import { ExamTimer } from "@/components/app/exam/ExamTimer";
+import { ExitButton } from "@/components/app/exam/ExitButton";
+import { QuestionHeader } from "@/components/app/exam/QuestionHeader";
+import {
+  QuestionNavigator,
+  type NavigatorItem,
+} from "@/components/app/exam/QuestionNavigator";
+import { ReferenceSheet } from "@/components/app/exam/ReferenceSheet";
 import { ctaClassName } from "@/components/CtaButton";
+import { useExamFlags } from "@/lib/learn/exam-flags";
 import type { RunnerState } from "@/lib/learn/tests";
-import { CHOICE_LETTERS, formatSeconds, MODULE_SECONDS } from "@/lib/learn/types";
+import { formatSeconds, MODULE_SECONDS } from "@/lib/learn/types";
 
 /** How long to sit on a selection before writing it. */
 const AUTOSAVE_DELAY_MS = 400;
-
-/** Below this the clock turns amber, then red — the usual SAT warning beats. */
-const WARN_SECONDS = 300;
-const URGENT_SECONDS = 60;
 
 type SaveState = "saving" | "saved" | "failed";
 
@@ -63,9 +80,15 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
   // both sides; the countdown effect below recomputes it from `deadlineMs`
   // every second thereafter.
   const [remaining, setRemaining] = useState(state.remainingSeconds);
+  const [timerHidden, setTimerHidden] = useState(false);
+  const [eliminating, setEliminating] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Per module: crossing into module 2 remounts this component (the page keys
+  // it on the phase), so module 2 correctly opens with a clean sheet.
+  const flags = useExamFlags(`test:${state.attemptId}:m${state.moduleNumber}`);
 
   /** One pending autosave per question; a re-selection replaces its own. */
   const saveTimers = useRef(new Map<string, number>());
@@ -112,6 +135,9 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
   }, [router, state.attemptId]);
 
   // --- The countdown --------------------------------------------------------
+  // Stays here, not in `ExamTimer`. The tick is what decides a module is over,
+  // and that decision does not belong in a component whose job is to draw a
+  // number — hiding the clock must not be able to stop the test.
   useEffect(() => {
     if (state.phase !== "module" || state.deadlineMs === null) return;
 
@@ -189,50 +215,57 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
   );
 
   // --- Interstitial ---------------------------------------------------------
+  // Kept as a plain centred card rather than exam chrome. It is the break
+  // between modules — nothing is timed, there is nothing to answer, and the
+  // one thing that should be on screen is the button that starts the clock.
   if (state.phase === "interstitial") {
     return (
-      <section className="mx-auto max-w-xl rounded-2xl border border-hairline bg-surface p-8 text-center">
-        <h1 className="font-display text-2xl font-extrabold text-ink">
-          Module 1 complete
-        </h1>
-        <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted">
-          Take a moment. Module 2 is another {state.questions.length || 22}{" "}
-          questions in {formatSeconds(MODULE_SECONDS)} — its clock starts when
-          you press Continue, not before.
-        </p>
-
-        {message && (
-          <p
-            role="alert"
-            className="mt-4 rounded-xl border border-miss-hairline bg-miss-surface px-4 py-3 text-[0.9375rem] text-miss-ink"
-          >
-            {message}
+      <div className="flex min-h-screen items-center justify-center px-4 py-10">
+        <section className="w-full max-w-xl rounded-2xl border border-hairline bg-surface p-8 text-center">
+          <h1 className="font-display text-2xl font-extrabold text-ink">
+            Module 1 complete
+          </h1>
+          <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted">
+            Take a moment. Module 2 is another {state.questions.length || 22}{" "}
+            questions in {formatSeconds(MODULE_SECONDS)} — its clock starts when
+            you press Continue, not before.
           </p>
-        )}
 
-        <div className="mt-6">
-          <button
-            type="button"
-            disabled={busy}
-            className={ctaClassName("primary")}
-            onClick={async () => {
-              setBusy(true);
-              setMessage(null);
-              const result = await startModuleTwoAction({
-                attemptId: state.attemptId,
-              });
-              if (result.status === "ok") {
-                router.refresh();
-              } else {
-                setBusy(false);
-                setMessage(result.message);
-              }
-            }}
-          >
-            {busy ? "Starting…" : `Continue to module 2 (${formatSeconds(MODULE_SECONDS)})`}
-          </button>
-        </div>
-      </section>
+          {message && (
+            <p
+              role="alert"
+              className="mt-4 rounded-xl border border-miss-hairline bg-miss-surface px-4 py-3 text-[0.9375rem] text-miss-ink"
+            >
+              {message}
+            </p>
+          )}
+
+          <div className="mt-6">
+            <button
+              type="button"
+              disabled={busy}
+              className={ctaClassName("primary")}
+              onClick={async () => {
+                setBusy(true);
+                setMessage(null);
+                const result = await startModuleTwoAction({
+                  attemptId: state.attemptId,
+                });
+                if (result.status === "ok") {
+                  router.refresh();
+                } else {
+                  setBusy(false);
+                  setMessage(result.message);
+                }
+              }}
+            >
+              {busy
+                ? "Starting…"
+                : `Continue to module 2 (${formatSeconds(MODULE_SECONDS)})`}
+            </button>
+          </div>
+        </section>
+      </div>
     );
   }
 
@@ -241,188 +274,165 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
   // page load, or a second tab. Nothing to take; point at the result.
   if (state.phase === "completed" || !question) {
     return (
-      <section className="mx-auto max-w-xl rounded-2xl border border-hairline bg-surface p-8 text-center">
-        <h1 className="font-display text-2xl font-extrabold text-ink">
-          This test is finished
-        </h1>
-        <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted">
-          It was submitted and scored. Open the review to see every question
-          alongside the right answer.
-        </p>
-        <div className="mt-6">
-          <button
-            type="button"
-            className={ctaClassName("primary")}
-            onClick={() =>
-              router.replace(`/practice/tests/review/${state.attemptId}`)
-            }
-          >
-            See the review
-          </button>
-        </div>
-      </section>
+      <div className="flex min-h-screen items-center justify-center px-4 py-10">
+        <section className="w-full max-w-xl rounded-2xl border border-hairline bg-surface p-8 text-center">
+          <h1 className="font-display text-2xl font-extrabold text-ink">
+            This test is finished
+          </h1>
+          <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted">
+            It was submitted and scored. Open the review to see every question
+            alongside the right answer.
+          </p>
+          <div className="mt-6">
+            <button
+              type="button"
+              className={ctaClassName("primary")}
+              onClick={() =>
+                router.replace(`/practice/tests/review/${state.attemptId}`)
+              }
+            >
+              See the review
+            </button>
+          </div>
+        </section>
+      </div>
     );
   }
 
   // --- The module -----------------------------------------------------------
-  const clockTone =
-    remaining <= URGENT_SECONDS
-      ? "bg-miss-surface text-miss-ink"
-      : remaining <= WARN_SECONDS
-        ? "bg-insight-chip text-insight-dark"
-        : "bg-background text-ink";
+  const isLast = index + 1 >= state.questions.length;
+
+  const navigatorItems: NavigatorItem[] = state.questions.map(
+    (item, itemIndex) => ({
+      id: item.id,
+      state:
+        itemIndex === index
+          ? "current"
+          : answers[item.id] !== undefined
+            ? "answered"
+            : "unanswered",
+      marked: flags.isMarked(item.id),
+    }),
+  );
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-xl font-extrabold text-ink">
-            {state.title}
-          </h1>
-          <p className="text-sm text-muted">
-            {state.testType === "full"
-              ? `Module ${state.moduleNumber} of ${state.moduleCount}`
-              : "Single module"}{" "}
-            · {answeredCount} of {state.questions.length} answered
-          </p>
-        </div>
-
-        <p
-          role="timer"
-          aria-live="off"
-          className={`rounded-xl px-4 py-2 font-display text-xl font-extrabold tabular-nums ${clockTone}`}
-        >
-          {formatSeconds(remaining)}
-        </p>
-      </header>
-
-      {/* Navigator. `aria-current` marks where you are; the fill marks what is
-          answered — the two things the real test's navigator shows. */}
-      <nav
-        aria-label="Questions in this module"
-        className="mt-4 flex flex-wrap gap-1.5"
-      >
-        {state.questions.map((item, itemIndex) => {
-          const isAnswered = answers[item.id] !== undefined;
-          const isCurrent = itemIndex === index;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setIndex(itemIndex)}
-              aria-current={isCurrent ? "true" : undefined}
-              aria-label={`Question ${itemIndex + 1}${isAnswered ? ", answered" : ", not answered"}`}
-              className={`h-8 w-8 rounded-lg border text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
-                isCurrent
-                  ? "border-ink bg-ink text-background"
-                  : isAnswered
-                    ? "border-accent bg-accent-chip text-accent"
-                    : "border-hairline bg-surface text-muted hover:border-accent"
-              }`}
-            >
-              {itemIndex + 1}
-            </button>
-          );
-        })}
-      </nav>
-
-      <section className="mt-4 rounded-2xl border border-hairline bg-surface p-6 sm:p-8">
-        <p className="text-sm font-semibold text-muted">
-          Question {index + 1} of {state.questions.length}
-        </p>
-
-        <MathText
-          as="p"
-          text={question.prompt}
-          className="mt-3 text-lg leading-relaxed whitespace-pre-line text-ink"
-        />
-
-        <div
-          className="mt-5 flex flex-col gap-2.5"
-          role="group"
-          aria-label="Answer choices"
-        >
-          {question.choices.map((choice, choiceIndex) => {
-            const chosen = answers[question.id] === choiceIndex;
-            return (
-              <button
-                key={choiceIndex}
-                type="button"
-                onClick={() => select(question.id, choiceIndex)}
-                aria-pressed={chosen}
-                className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-[0.9375rem] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
-                  chosen
-                    ? "border-accent bg-accent-chip text-ink"
-                    : "border-hairline bg-surface text-ink hover:border-accent"
-                }`}
-              >
-                <span className="font-display font-bold">
-                  {CHOICE_LETTERS[choiceIndex]}
-                </span>
-                <MathText text={choice} />
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Only ever shown on failure. A "saved" tick on every question would
-            be noise on a test where saving is supposed to be invisible. */}
-        {saveStates[question.id] === "failed" && (
-          <p
-            role="alert"
-            className="mt-4 rounded-xl border border-miss-hairline bg-miss-surface px-4 py-3 text-sm text-miss-ink"
-          >
-            That answer didn&apos;t save. Pick it again — if it keeps failing,
-            your answers so far are still recorded.
-          </p>
-        )}
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-          <CalculatorPanel />
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setIndex((current) => Math.max(0, current - 1))}
-              disabled={index === 0}
-              className={`${ctaClassName("secondary")} disabled:cursor-not-allowed disabled:opacity-40`}
-            >
-              Back
-            </button>
-
-            {index + 1 < state.questions.length ? (
-              <button
-                type="button"
-                onClick={() => setIndex((current) => current + 1)}
-                className={ctaClassName("primary")}
-              >
-                Next
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setConfirming(true)}
-                disabled={busy}
-                className={ctaClassName("primary")}
-              >
-                Submit module
-              </button>
-            )}
+    <ExamShell
+      left={
+        <>
+          <ExitButton
+            href="/practice"
+            label="Go back"
+            confirm={{
+              heading: "Leave this module?",
+              body: "The clock keeps running while you're away, and it isn't paused by leaving. Your answers are already saved — you can come back to this test and pick up where the timer has got to.",
+              confirmLabel: "Leave",
+            }}
+          />
+          <div className="min-w-0">
+            <p className="truncate font-display text-[0.9375rem] font-bold text-ink">
+              {state.title}
+            </p>
+            <p className="truncate text-xs text-muted">
+              {state.testType === "full"
+                ? `Module ${state.moduleNumber} of ${state.moduleCount}`
+                : "Single module"}{" "}
+              · {answeredCount} of {state.questions.length} answered
+            </p>
           </div>
-        </div>
-      </section>
-
-      {index + 1 < state.questions.length && (
-        <div className="mt-4 text-right">
+        </>
+      }
+      timer={
+        <ExamTimer
+          seconds={remaining}
+          mode="countdown"
+          hidden={timerHidden}
+          onToggleHidden={() => setTimerHidden((wasHidden) => !wasHidden)}
+        />
+      }
+      tools={
+        <>
+          <CalculatorPanel />
+          <ReferenceSheet />
+        </>
+      }
+      questionNav={
+        <QuestionNavigator
+          items={navigatorItems}
+          currentIndex={index}
+          onJump={setIndex}
+          variant="answered"
+          label="Questions in this module"
+        />
+      }
+      actions={
+        <>
           <button
             type="button"
-            onClick={() => setConfirming(true)}
-            disabled={busy}
-            className="text-[0.9375rem] font-semibold text-muted underline transition-colors hover:text-ink"
+            onClick={() => setIndex((current) => Math.max(0, current - 1))}
+            disabled={index === 0}
+            className={examButtonClassName("secondary")}
           >
-            Submit module early
+            Back
           </button>
-        </div>
+
+          {isLast ? (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              disabled={busy}
+              className={examButtonClassName("primary")}
+            >
+              Submit module
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIndex((current) => current + 1)}
+              className={examButtonClassName("primary")}
+            >
+              Next
+            </button>
+          )}
+        </>
+      }
+    >
+      <QuestionHeader
+        number={index + 1}
+        marked={flags.isMarked(question.id)}
+        onToggleMark={() => flags.toggleMark(question.id)}
+        eliminating={eliminating}
+        onToggleEliminating={() =>
+          setEliminating((wasEliminating) => !wasEliminating)
+        }
+      />
+
+      <MathText
+        as="p"
+        text={question.prompt}
+        className="mt-5 text-lg leading-relaxed whitespace-pre-line text-ink"
+      />
+
+      <div className="mt-6">
+        <ChoiceList
+          choices={question.choices}
+          selected={answers[question.id] ?? null}
+          onSelect={(choice) => select(question.id, choice)}
+          crossed={flags.crossedFor(question.id)}
+          onToggleCross={(choice) => flags.toggleCross(question.id, choice)}
+          eliminating={eliminating}
+        />
+      </div>
+
+      {/* Only ever shown on failure. A "saved" tick on every question would
+          be noise on a test where saving is supposed to be invisible. */}
+      {saveStates[question.id] === "failed" && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-miss-hairline bg-miss-surface px-4 py-3 text-sm text-miss-ink"
+        >
+          That answer didn&apos;t save. Pick it again — if it keeps failing,
+          your answers so far are still recorded.
+        </p>
       )}
 
       {message && (
@@ -432,6 +442,19 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
         >
           {message}
         </p>
+      )}
+
+      {!isLast && (
+        <div className="mt-8 text-right">
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            disabled={busy}
+            className="text-[0.9375rem] font-semibold text-muted underline transition-colors hover:text-ink"
+          >
+            Submit module early
+          </button>
+        </div>
       )}
 
       {confirming && (
@@ -463,7 +486,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
               <button
                 type="button"
                 onClick={() => setConfirming(false)}
-                className={ctaClassName("secondary")}
+                className={examButtonClassName("secondary")}
               >
                 Keep working
               </button>
@@ -474,7 +497,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
                   setConfirming(false);
                   void endModule();
                 }}
-                className={ctaClassName("primary")}
+                className={examButtonClassName("primary")}
               >
                 {busy ? "Submitting…" : "Submit"}
               </button>
@@ -482,6 +505,6 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
           </div>
         </div>
       )}
-    </div>
+    </ExamShell>
   );
 }
