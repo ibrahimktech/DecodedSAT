@@ -147,7 +147,9 @@ export function TestRunner({
       <p className="mt-5 text-sm font-semibold text-muted">
         Question {index + 1} of {questions.length}
       </p>
-      <p className="mt-2 text-lg leading-relaxed text-ink">{question.prompt}</p>
+      <p className="mt-2 font-question text-lg leading-7 text-ink">
+        {question.prompt}
+      </p>
 
       <div className="mt-4 flex flex-col gap-2.5" role="group" aria-label="Answer choices">
         {question.choices.map((choice, choiceIndex) => (
@@ -157,13 +159,13 @@ export function TestRunner({
             disabled={timeExpired || submitting}
             onClick={() => choose(choiceIndex)}
             aria-pressed={answers[question.id] === choiceIndex}
-            className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-[0.9375rem] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60 ${
+            className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3.5 text-left font-question text-[1.0625rem] leading-7 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60 ${
               answers[question.id] === choiceIndex
                 ? "border-accent bg-accent-chip text-ink"
                 : "border-hairline bg-surface text-ink hover:border-accent"
             }`}
           >
-            <span className="font-display font-bold">
+            <span className="font-question font-bold">
               {CHOICE_LETTERS[choiceIndex]}
             </span>
             <span>{choice}</span>

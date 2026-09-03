@@ -54,7 +54,7 @@ export function ChoiceList({
 
   function rowClassName(index: number): string {
     const base =
-      "flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-[0.9375rem] transition-colors " +
+      "flex w-full items-center gap-3 rounded-xl border px-4 py-3.5 text-left font-question text-[1.0625rem] leading-7 transition-colors " +
       "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-default";
 
     if (graded) {
@@ -96,7 +96,7 @@ export function ChoiceList({
               }`}
             >
               <span
-                className={`font-display font-bold ${isCrossed ? "line-through" : ""}`}
+                className={`font-question font-bold ${isCrossed ? "line-through" : ""}`}
               >
                 {CHOICE_LETTERS[index]}
               </span>

@@ -158,7 +158,7 @@ export default async function PracticeTestReviewPage({
                     <MathText
                       as="p"
                       text={item.prompt}
-                      className="mt-3 leading-relaxed whitespace-pre-line text-ink"
+                      className="mt-3 font-question text-base leading-7 whitespace-pre-line text-ink"
                     />
 
                     <ul className="mt-4 flex flex-col gap-2">
@@ -170,7 +170,7 @@ export default async function PracticeTestReviewPage({
                         return (
                           <li
                             key={choiceIndex}
-                            className={`flex items-center gap-3 rounded-xl border px-4 py-2.5 text-[0.9375rem] ${
+                            className={`flex items-center gap-3 rounded-xl border px-4 py-3 font-question text-[1.0625rem] leading-7 ${
                               isCorrectChoice
                                 ? "border-accent bg-accent-chip text-ink"
                                 : isPicked
@@ -178,7 +178,7 @@ export default async function PracticeTestReviewPage({
                                   : "border-hairline bg-surface text-muted"
                             }`}
                           >
-                            <span className="font-display font-bold">
+                            <span className="font-question font-bold">
                               {CHOICE_LETTERS[choiceIndex]}
                             </span>
                             <MathText text={choice} />
@@ -196,7 +196,7 @@ export default async function PracticeTestReviewPage({
                       <MathText
                         as="p"
                         text={item.explanation}
-                        className="mt-4 rounded-xl bg-background px-4 py-3 text-[0.9375rem] leading-relaxed whitespace-pre-line text-ink"
+                        className="mt-4 rounded-xl bg-background px-4 py-3 font-question text-base leading-7 whitespace-pre-line text-ink"
                       />
                     )}
 

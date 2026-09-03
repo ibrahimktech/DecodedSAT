@@ -65,6 +65,7 @@
   /* -- Type -------------------------------------------------------------- */
   --font-sans: var(--font-figtree), system-ui, sans-serif;
   --font-display: var(--font-baloo), var(--font-figtree), sans-serif;
+  --font-question: var(--font-noto-serif), "Noto Serif", Georgia, serif;
 
   /* -- Elevation --------------------------------------------------------- */
   --shadow-nav: 0 6px 20px rgb(4 52 44 / 0.06);

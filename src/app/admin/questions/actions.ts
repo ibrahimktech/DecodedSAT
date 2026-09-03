@@ -1,8 +1,8 @@
 "use server";
 
 /**
- * Server Actions for /admin/questions: bulk JSON upload, inline edit, and
- * soft delete/restore.
+ * Server Actions for /admin/questions: manual creation, bulk JSON upload,
+ * inline edit, and soft delete/restore.
  *
  * Every action independently re-establishes the admin context — session plus
  * a server-side `is_admin()` RPC — before touching anything. The client only
@@ -21,6 +21,7 @@ import { getAdminActionContext } from "@/lib/auth/admin";
 import { describeError } from "@/lib/auth/describe-error";
 import { GENERIC_ERROR_MESSAGE, rateLimitedMessage } from "@/lib/auth/state";
 import {
+  CreateQuestionSchema,
   EditQuestionSchema,
   SetActiveSchema,
   UPLOAD_MAX_BYTES,
@@ -28,7 +29,11 @@ import {
   type UploadPayload,
 } from "@/lib/admin/schemas";
 import { sanitizeLine, sanitizeMultiline } from "@/lib/admin/sanitize";
-import type { AdminActionResult, UploadState } from "@/lib/admin/types";
+import type {
+  AdminActionResult,
+  CreateQuestionResult,
+  UploadState,
+} from "@/lib/admin/types";
 import { createRateLimiter } from "@/lib/rate-limit";
 
 /**
@@ -46,6 +51,23 @@ const editLimiter = createRateLimiter({
   windowMs: 60_000,
   prefix: "admin-edit",
 });
+
+const createLimiter = createRateLimiter({
+  limit: 60,
+  windowMs: 60_000,
+  prefix: "admin-create-question",
+});
+
+function questionFieldErrors(
+  issues: Array<{ path: PropertyKey[]; message: string }>,
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const issue of issues) {
+    const key = issue.path.map(String).join(".");
+    if (key && errors[key] === undefined) errors[key] = issue.message;
+  }
+  return errors;
+}
 
 /**
  * Sanitizes every string that will be stored. Runs *after* Zod (shape is
@@ -159,6 +181,176 @@ export async function uploadQuestionSetAction(
     console.error(`[admin] upload threw: ${describeError(error)}`);
     return { status: "error", message: GENERIC_ERROR_MESSAGE };
   }
+}
+
+/**
+ * Creates one question through the same database model as the JSON importer.
+ * The RPC is required because authenticated clients intentionally have no
+ * INSERT grant on `questions`; it independently checks `is_admin()` and every
+ * field before inserting atomically.
+ */
+export async function createQuestionAction(
+  input: unknown,
+): Promise<CreateQuestionResult> {
+  try {
+    const context = await getAdminActionContext();
+    if (!context) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+
+    const rate = await createLimiter.check(context.user.id);
+    if (!rate.ok) {
+      return {
+        status: "rate_limited",
+        message: rateLimitedMessage(rate.retryAfterSeconds),
+      };
+    }
+
+    const parsed = CreateQuestionSchema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        status: "error",
+        message: "Check the highlighted fields and try again.",
+        fieldErrors: questionFieldErrors(parsed.error.issues),
+      };
+    }
+
+    const choices = parsed.data.choices.map((choice) =>
+      sanitizeLine(choice, 1000),
+    );
+    const prompt = sanitizeMultiline(parsed.data.prompt, 4000);
+    const explanation = sanitizeMultiline(parsed.data.explanation, 4000);
+    const externalId = sanitizeLine(parsed.data.externalId, 64);
+
+    const sanitizedErrors: Record<string, string> = {};
+    if (prompt === "") sanitizedErrors.prompt = "Enter the question prompt.";
+    if (explanation === "") {
+      sanitizedErrors.explanation = "Enter the answer explanation.";
+    }
+    choices.forEach((choice, index) => {
+      if (choice === "") {
+        sanitizedErrors[`choices.${index}`] = `Enter choice ${"ABCD"[index]}.`;
+      }
+    });
+    if (Object.keys(sanitizedErrors).length > 0) {
+      return {
+        status: "error",
+        message: "Check the highlighted fields and try again.",
+        fieldErrors: sanitizedErrors,
+      };
+    }
+
+    // These read checks produce useful field-level errors. The RPC repeats
+    // them to close the race between validation and insertion.
+    const { data: subtopic, error: subtopicError } = await context.supabase
+      .from("subtopics")
+      .select("id")
+      .eq("id", parsed.data.subtopicId)
+      .maybeSingle();
+    if (subtopicError) {
+      console.error(
+        `[admin] create question subtopic lookup failed: ${subtopicError.message}`,
+      );
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
+    if (!subtopic) {
+      return {
+        status: "error",
+        message: "Check the highlighted fields and try again.",
+        fieldErrors: { subtopicId: "Choose an existing skill / subtopic." },
+      };
+    }
+
+    const questionSetId = parsed.data.questionSetId || null;
+    if (questionSetId) {
+      const { data: questionSet, error: setError } = await context.supabase
+        .from("question_sets")
+        .select("id")
+        .eq("id", questionSetId)
+        .maybeSingle();
+      if (setError) {
+        console.error(
+          `[admin] create question set lookup failed: ${setError.message}`,
+        );
+        return { status: "error", message: GENERIC_ERROR_MESSAGE };
+      }
+      if (!questionSet) {
+        return {
+          status: "error",
+          message: "Check the highlighted fields and try again.",
+          fieldErrors: { questionSetId: "Choose an existing question set." },
+        };
+      }
+    }
+
+    const { data, error } = await context.supabase.rpc(
+      "admin_create_question",
+      {
+        p_subtopic_id: parsed.data.subtopicId,
+        p_prompt: prompt,
+        p_choices: choices,
+        p_correct_choice: parsed.data.correctChoice,
+        p_explanation: explanation,
+        p_difficulty: parsed.data.difficulty,
+        p_is_active: parsed.data.isActive,
+        p_question_set_id: questionSetId,
+        p_external_id: externalId || null,
+      },
+    );
+
+    if (error) {
+      if (
+        error.code === "23505" ||
+        error.message.includes("duplicate_question_identity")
+      ) {
+        return {
+          status: "error",
+          message: "Check the highlighted fields and try again.",
+          fieldErrors: {
+            externalId: "That external ID already exists in this question set.",
+          },
+        };
+      }
+      if (error.message.includes("unknown_subtopic")) {
+        return {
+          status: "error",
+          message: "Check the highlighted fields and try again.",
+          fieldErrors: { subtopicId: "Choose an existing skill / subtopic." },
+        };
+      }
+      if (error.message.includes("unknown_question_set")) {
+        return {
+          status: "error",
+          message: "Check the highlighted fields and try again.",
+          fieldErrors: { questionSetId: "Choose an existing question set." },
+        };
+      }
+      console.error(
+        `[admin] create question rpc failed: ${error.code ?? "no_code"} — ${error.message}`,
+      );
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
+
+    const createdId = zUuid(data);
+    if (!createdId) {
+      console.error("[admin] create question rpc returned an invalid id");
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
+
+    revalidatePath("/admin/questions");
+    revalidatePath("/admin");
+    return { status: "ok", id: createdId };
+  } catch (error) {
+    console.error(`[admin] create question threw: ${describeError(error)}`);
+    return { status: "error", message: GENERIC_ERROR_MESSAGE };
+  }
+}
+
+function zUuid(value: unknown): string | null {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+    ? value
+    : null;
 }
 
 export async function updateQuestionAction(

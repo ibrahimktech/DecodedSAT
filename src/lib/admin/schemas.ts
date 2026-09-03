@@ -60,16 +60,76 @@ export type UploadPayload = z.infer<typeof UploadPayloadSchema>;
 /** Upload files above this are refused before parsing. */
 export const UPLOAD_MAX_BYTES = 1_000_000;
 
-// --- Inline question edit --------------------------------------------------------
+// --- Question create / edit ------------------------------------------------------
 
-export const EditQuestionSchema = z.object({
-  id: z.uuid(),
-  subtopicId: z.uuid(),
-  prompt: contentText(4000),
-  choices: z.array(contentText(1000)).length(4),
-  correctChoice: z.number().int().min(0).max(3),
-  explanation: contentText(4000),
+/**
+ * The fields shared by manual creation and inline editing. Keeping this as the
+ * single contract means the new authoring flow cannot drift from the editor or
+ * from the shape the player already renders.
+ */
+export const QuestionFieldsSchema = z.object({
+  subtopicId: z
+    .string()
+    .trim()
+    .min(1, "Choose a skill / subtopic.")
+    .pipe(z.uuid("Choose an existing skill / subtopic.")),
+  prompt: z
+    .string()
+    .trim()
+    .min(1, "Enter the question prompt.")
+    .max(4000, "Use 4,000 characters or fewer."),
+  choices: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1, "Enter the answer choice.")
+        .max(1000, "Use 1,000 characters or fewer."),
+    )
+    .length(4, "Enter exactly four answer choices."),
+  correctChoice: z
+    .number()
+    .int()
+    .min(0, "Select the correct answer.")
+    .max(3, "Select the correct answer."),
+  explanation: z
+    .string()
+    .trim()
+    .min(1, "Enter the answer explanation.")
+    .max(4000, "Use 4,000 characters or fewer."),
   difficulty: DifficultyEnum,
+});
+
+export const EditQuestionSchema = QuestionFieldsSchema.extend({
+  id: z.uuid(),
+});
+
+/**
+ * Question-set identity is optional for hand-authored questions, but it is a
+ * pair when present: `externalId` is only unique and meaningful inside a set.
+ */
+export const CreateQuestionSchema = QuestionFieldsSchema.extend({
+  questionSetId: z.union([z.uuid(), z.literal("")]),
+  externalId: z
+    .string()
+    .trim()
+    .max(64, "Use 64 characters or fewer."),
+  isActive: z.boolean(),
+}).superRefine((value, context) => {
+  if (value.questionSetId !== "" && value.externalId === "") {
+    context.addIssue({
+      code: "custom",
+      path: ["externalId"],
+      message: "Enter an external ID for this question set.",
+    });
+  }
+  if (value.questionSetId === "" && value.externalId !== "") {
+    context.addIssue({
+      code: "custom",
+      path: ["questionSetId"],
+      message: "Choose a question set for this external ID.",
+    });
+  }
 });
 
 /** Soft delete / restore — for questions and videos both. */

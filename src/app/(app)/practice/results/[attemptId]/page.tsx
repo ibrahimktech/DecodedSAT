@@ -103,7 +103,7 @@ export default async function PracticeResultsPage({
                   </p>
                 </header>
 
-                <p className="mt-3 text-[0.9375rem] leading-relaxed text-ink">
+                <p className="mt-3 font-question text-base leading-7 text-ink">
                   {item.prompt}
                 </p>
 
@@ -114,7 +114,7 @@ export default async function PracticeResultsPage({
                     return (
                       <li
                         key={choiceIndex}
-                        className={`flex items-center gap-3 rounded-lg border px-3.5 py-2 text-[0.9375rem] ${
+                        className={`flex items-center gap-3 rounded-lg border px-3.5 py-2.5 font-question text-[1.0625rem] leading-7 ${
                           isRight
                             ? "border-accent bg-accent-chip text-ink"
                             : isYours
@@ -122,7 +122,7 @@ export default async function PracticeResultsPage({
                               : "border-transparent text-muted"
                         }`}
                       >
-                        <span className="font-display font-bold">
+                        <span className="font-question font-bold">
                           {CHOICE_LETTERS[choiceIndex]}
                         </span>
                         <span>{choice}</span>
@@ -143,7 +143,7 @@ export default async function PracticeResultsPage({
 
                 {!wasCorrect && item.explanation && (
                   <div className="mt-3 rounded-xl border border-insight-hairline bg-insight-surface p-4">
-                    <p className="text-[0.9375rem] leading-relaxed text-ink">
+                    <p className="font-question text-base leading-7 text-ink">
                       {item.explanation}
                     </p>
                     {item.subtopicHasVideo && (

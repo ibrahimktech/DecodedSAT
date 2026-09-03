@@ -300,15 +300,15 @@ export function ReportQuestionButton({
                   <MathText
                     as="p"
                     text={reportedQuestion.prompt}
-                    className="whitespace-pre-line text-[0.9375rem] leading-relaxed text-ink"
+                    className="font-question whitespace-pre-line text-base leading-7 text-ink"
                   />
                   <ol className="mt-3 flex flex-col gap-1.5">
                     {reportedQuestion.choices.map((choice, index) => (
                       <li
                         key={index}
-                        className="flex gap-2 text-sm leading-relaxed text-muted"
+                        className="flex gap-2 font-question text-base leading-7 text-muted"
                       >
-                        <span className="shrink-0 font-display font-bold text-ink">
+                        <span className="shrink-0 font-question font-bold text-ink">
                           {CHOICE_LETTERS[index]}
                         </span>
                         <MathText text={choice} />

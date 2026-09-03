@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Baloo_2, Figtree } from "next/font/google";
+import { Baloo_2, Figtree, Noto_Serif } from "next/font/google";
 import { site } from "@/lib/site";
 import "./globals.css";
 
@@ -18,6 +18,14 @@ const baloo = Baloo_2({
   subsets: ["latin"],
   weight: ["500", "600", "700", "800"],
   variable: "--font-baloo",
+  display: "swap",
+});
+
+/** College Board's published digital-assessment content typeface. */
+const notoSerif = Noto_Serif({
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+  variable: "--font-noto-serif",
   display: "swap",
 });
 
@@ -62,7 +70,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${figtree.variable} ${baloo.variable}`}>
+    <html
+      lang="en"
+      className={`${figtree.variable} ${baloo.variable} ${notoSerif.variable}`}
+    >
       <body className="antialiased">{children}</body>
     </html>
   );

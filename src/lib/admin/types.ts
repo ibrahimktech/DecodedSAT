@@ -171,6 +171,15 @@ export type AdminActionResult =
   | { status: "ok" }
   | { status: "error" | "rate_limited"; message: string };
 
+/** Manual creation returns the id so the UI can show the new list row. */
+export type CreateQuestionResult =
+  | { status: "ok"; id: string }
+  | {
+      status: "error" | "rate_limited";
+      message: string;
+      fieldErrors?: Record<string, string>;
+    };
+
 /** The upload action's form state, rendered as the import summary. */
 export type UploadState =
   | { status: "idle" }

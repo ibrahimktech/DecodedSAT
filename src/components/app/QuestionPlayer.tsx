@@ -70,7 +70,7 @@
  * a set out from under someone who was reading.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -80,7 +80,10 @@ import {
   startQuestionBankSessionAction,
   submitQuestionAttemptAction,
 } from "@/app/(app)/questions/actions";
-import { CalculatorPanel } from "@/components/app/CalculatorPanel";
+import {
+  CalculatorPanel,
+  CalculatorToggle,
+} from "@/components/app/CalculatorPanel";
 import { MathText } from "@/components/app/MathText";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { Skeleton } from "@/components/app/Skeleton";
@@ -219,6 +222,8 @@ export function QuestionPlayer({
   /** Seconds left before that happens, while the warning is up; else null. */
   const [idleCountdown, setIdleCountdown] = useState<number | null>(null);
   const [eliminating, setEliminating] = useState(false);
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const calculatorId = useId();
   /** The running total when the goal was passed, or null while it has not. */
   const [goalBanner, setGoalBanner] = useState<number | null>(null);
 
@@ -682,9 +687,21 @@ export function QuestionPlayer({
       }
       tools={
         <>
-          <CalculatorPanel />
+          <CalculatorToggle
+            open={calculatorOpen}
+            onToggle={() => setCalculatorOpen((wasOpen) => !wasOpen)}
+            controlsId={calculatorId}
+          />
           <ReferenceSheet />
         </>
+      }
+      sidePanel={
+        calculatorOpen ? (
+          <CalculatorPanel
+            id={calculatorId}
+            onClose={() => setCalculatorOpen(false)}
+          />
+        ) : undefined
       }
       questionNav={
         <QuestionNavigator
@@ -863,7 +880,7 @@ export function QuestionPlayer({
       <MathText
         as="p"
         text={question.prompt}
-        className="mt-5 text-lg leading-relaxed whitespace-pre-line text-ink"
+        className="mt-5 font-question text-lg leading-7 whitespace-pre-line text-ink"
       />
 
       <div className="mt-6">
@@ -926,7 +943,7 @@ export function QuestionPlayer({
           <MathText
             as="p"
             text={record.verdict.explanation}
-            className="mt-1.5 text-[0.9375rem] leading-relaxed whitespace-pre-line text-ink"
+            className="mt-1.5 font-question text-base leading-7 whitespace-pre-line text-ink"
           />
 
           {!record.verdict.isCorrect && question.subtopicHasVideo && (

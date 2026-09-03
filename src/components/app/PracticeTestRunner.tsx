@@ -5,7 +5,7 @@
  *
  * Mirrors the real digital SAT: full-bleed with no site navigation, one
  * question at a time, the clock centred at the top with a Hide control, the
- * calculator and reference sheet as floating tools, a navigator behind the
+ * docked calculator and floating reference sheet, a navigator behind the
  * question counter, a strict countdown, and — on a full test — a Continue
  * screen between the two modules whose clock does not start until it is
  * pressed.
@@ -41,14 +41,17 @@
  * mid-module does not wipe a student's working notes. See `@/lib/learn/exam-flags`.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   savePracticeTestResponseAction,
   startModuleTwoAction,
   submitPracticeTestModuleAction,
 } from "@/app/(app)/practice/tests/actions";
-import { CalculatorPanel } from "@/components/app/CalculatorPanel";
+import {
+  CalculatorPanel,
+  CalculatorToggle,
+} from "@/components/app/CalculatorPanel";
 import { MathText } from "@/components/app/MathText";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { ChoiceList } from "@/components/app/exam/ChoiceList";
@@ -83,6 +86,8 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
   const [remaining, setRemaining] = useState(state.remainingSeconds);
   const [timerHidden, setTimerHidden] = useState(false);
   const [eliminating, setEliminating] = useState(false);
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const calculatorId = useId();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -352,9 +357,21 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
       }
       tools={
         <>
-          <CalculatorPanel />
+          <CalculatorToggle
+            open={calculatorOpen}
+            onToggle={() => setCalculatorOpen((wasOpen) => !wasOpen)}
+            controlsId={calculatorId}
+          />
           <ReferenceSheet />
         </>
+      }
+      sidePanel={
+        calculatorOpen ? (
+          <CalculatorPanel
+            id={calculatorId}
+            onClose={() => setCalculatorOpen(false)}
+          />
+        ) : undefined
       }
       questionNav={
         <QuestionNavigator
@@ -410,7 +427,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
       <MathText
         as="p"
         text={question.prompt}
-        className="mt-5 text-lg leading-relaxed whitespace-pre-line text-ink"
+        className="mt-5 font-question text-lg leading-7 whitespace-pre-line text-ink"
       />
 
       <div className="mt-6">

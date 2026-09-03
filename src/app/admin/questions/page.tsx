@@ -44,6 +44,7 @@ export default async function AdminQuestionsPage({
   const initialEditingId =
     single("edit") === filters.id ? filters.id : undefined;
   const returnTo = safeReportReturnPath(single("returnTo"));
+  const wasCreated = single("created") === "1" && Boolean(filters.id);
 
   const [domains, subtopics, sets, questions] = await Promise.all([
     getDomains(supabase),
@@ -56,17 +57,40 @@ export default async function AdminQuestionsPage({
 
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-3xl font-extrabold text-ink">
           Questions
         </h1>
-        <Link
-          href="/admin"
-          className="text-sm font-semibold text-accent hover:text-accent-hover"
-        >
-          ← Overview
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/admin/questions/new"
+            className="rounded-xl bg-accent px-4 py-2 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Add Question
+          </Link>
+          <Link
+            href="/admin"
+            className="text-sm font-semibold text-accent hover:text-accent-hover"
+          >
+            ← Overview
+          </Link>
+        </div>
       </div>
+
+      {wasCreated && (
+        <div
+          role="status"
+          className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent bg-accent-chip px-4 py-3 text-sm font-medium text-accent"
+        >
+          <span>Question created. It appears below and is ready to edit.</span>
+          <Link
+            href="/admin/questions/new"
+            className="font-bold underline underline-offset-2 hover:text-accent-hover"
+          >
+            Add another question
+          </Link>
+        </div>
+      )}
 
       <UploadQuestionsPanel />
 
