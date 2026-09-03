@@ -10,16 +10,30 @@
  */
 
 import { z } from "zod";
+import {
+  isAvailableOfficialSatDate,
+  isOfficialSatWeekendDate,
+} from "@/lib/onboarding/sat-dates";
 
 /** SAT section scores run 200–800 on a 10-point grid. */
 export const SCORE_MIN = 200;
 export const SCORE_MAX = 800;
 export const SCORE_STEP = 10;
 
+export function isValidSatScore(value: string | number): boolean {
+  if (typeof value === "string" && value.trim() === "") return false;
+  const score = Number(value);
+  return (
+    Number.isInteger(score) &&
+    score >= SCORE_MIN &&
+    score <= SCORE_MAX &&
+    score % SCORE_STEP === 0
+  );
+}
+
 /**
- * The estimate and target are picked from a dropdown, not typed. 50-point
- * buckets keep that list to 13 entries — short enough to scan on a phone,
- * and honest about the precision of "roughly where are you now?".
+ * Targets retain the existing 50-point buckets. Baseline scores use the exact
+ * 10-point input because a student may know or estimate any valid SAT score.
  */
 export const SCORE_BUCKETS: readonly number[] = Array.from(
   { length: 13 },
@@ -44,37 +58,38 @@ export const MAX_FOCUS_DOMAINS = 4;
  * hidden inputs are no exception. Coercion here is not "repairing" bad input
  * — a non-numeric string still fails `.int()` and the whole parse is rejected.
  */
-const scoreField = z.coerce
-  .number()
-  .int()
-  .min(SCORE_MIN, `Scores start at ${SCORE_MIN}.`)
-  .max(SCORE_MAX, `Scores top out at ${SCORE_MAX}.`)
-  .refine((value) => value % SCORE_STEP === 0, {
-    message: `Scores move in steps of ${SCORE_STEP}.`,
+const scoreField = z.preprocess(
+  (value) =>
+    typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.coerce
+    .number("Enter a SAT Math score.")
+    .int("Enter a whole-number score.")
+    .min(SCORE_MIN, `Scores start at ${SCORE_MIN}.`)
+    .max(SCORE_MAX, `Scores top out at ${SCORE_MAX}.`)
+    .refine((value) => value % SCORE_STEP === 0, {
+      message: `Scores move in steps of ${SCORE_STEP}.`,
+    }),
+);
+
+/** Only published, non-expired SAT Weekend dates may reach the database. */
+const officialTestDateField = z
+  .string()
+  .refine(isOfficialSatWeekendDate, {
+    message: "Select an official SAT Weekend date.",
+  })
+  .refine((value) => isAvailableOfficialSatDate(value), {
+    message: "That SAT date has already passed.",
   });
 
-/** Midnight today, in the viewer's own zone — `test_date` is a plain date. */
-function startOfToday(): Date {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return today;
-}
-
-const testDateField = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date.")
-  .refine((value) => !Number.isNaN(Date.parse(value)), "Pick a real date.")
-  .refine((value) => new Date(`${value}T00:00:00`) >= startOfToday(), {
-    message: "That date has already passed.",
-  })
-  .refine(
-    (value) => {
-      const limit = startOfToday();
-      limit.setFullYear(limit.getFullYear() + 3);
-      return new Date(`${value}T00:00:00`) <= limit;
-    },
-    { message: "Pick a date within the next three years." },
-  );
+const satAttemptsField = z.preprocess(
+  (value) =>
+    typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.coerce
+    .number("Choose the option that fits you.")
+    .int()
+    .min(0)
+    .max(10),
+);
 
 /**
  * The field shapes, with no refinements attached.
@@ -86,7 +101,7 @@ const testDateField = z
  * the cross-field rules that apply to their own step.
  */
 const OnboardingFields = z.object({
-  satAttempts: z.coerce.number().int().min(0).max(10),
+  satAttempts: satAttemptsField,
   /**
    * Absent when they have never sat the exam. `""` is what an unfilled hidden
    * input sends, so it has to mean "absent" rather than "invalid".
@@ -98,7 +113,7 @@ const OnboardingFields = z.object({
   targetScore: scoreField,
   /** `""` is the "not sure yet" answer, which is a real answer. */
   testDate: z
-    .union([z.literal(""), testDateField])
+    .union([z.literal(""), officialTestDateField])
     .transform((value) => (value === "" ? null : value)),
   /**
    * Ids are checked for shape here and for existence in the database, where
@@ -109,7 +124,7 @@ const OnboardingFields = z.object({
 });
 
 /**
- * The pairing rule, applied both to the whole form and to step 1 on its own:
+ * The pairing rule applied to the whole form:
  * a Math score for an exam they say they never sat is incoherent, and so is
  * having sat it with no score to report. `complete_onboarding()` enforces the
  * same pair independently.
@@ -132,16 +147,32 @@ const satHistoryIssue = () => ({
 export const OnboardingSchema = OnboardingFields.refine(
   satHistoryIsCoherent,
   satHistoryIssue(),
-);
+).transform((data) => ({
+  ...data,
+  // A real recent result is the baseline. Ignore any stale or forged estimate
+  // when the selected history path says the student has taken the SAT.
+  currentScoreEstimate:
+    data.satAttempts > 0
+      ? (data.lastSatMathScore ?? data.currentScoreEstimate)
+      : data.currentScoreEstimate,
+}));
 
 export type OnboardingAnswers = z.infer<typeof OnboardingSchema>;
 
 /** The three fields Settings may edit after onboarding closes. */
-export const StudyPlanSchema = OnboardingFields.pick({
-  targetScore: true,
-  dailyGoal: true,
-  testDate: true,
+export const StudyPlanSchema = z.object({
+  targetScore: scoreField,
+  dailyGoal: z.coerce.number().int().min(1).max(200),
+  // Settings and onboarding share the same official-date allowlist. The
+  // database format remains a nullable YYYY-MM-DD date.
+  testDate: z
+    .union([z.literal(""), officialTestDateField])
+    .transform((value) => (value === "" ? null : value)),
 });
+
+export const RECENT_SCORE_STEP_SCHEMA = OnboardingFields.pick({
+  lastSatMathScore: true,
+}).refine((data) => data.lastSatMathScore !== null, satHistoryIssue());
 
 /**
  * Per-step validation for the wizard's "Next" button.
@@ -152,12 +183,10 @@ export const StudyPlanSchema = OnboardingFields.pick({
  * a subset of it for feedback, never a substitute.
  */
 export const STEP_SCHEMAS = [
-  // 0 — SAT history (+ last score when they have sat it)
-  OnboardingFields.pick({ satAttempts: true, lastSatMathScore: true }).refine(
-    satHistoryIsCoherent,
-    satHistoryIssue(),
-  ),
-  // 1 — current estimate
+  // 0 — SAT history. The path-specific baseline is question 2.
+  OnboardingFields.pick({ satAttempts: true }),
+  // 1 — current estimate for students who have not taken the SAT. The wizard
+  // swaps in RECENT_SCORE_STEP_SCHEMA at this index for students who have.
   OnboardingFields.pick({ currentScoreEstimate: true }),
   // 2 — target
   OnboardingFields.pick({ targetScore: true }),

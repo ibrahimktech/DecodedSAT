@@ -1,8 +1,8 @@
 import { Skeleton, SkeletonPage } from "@/components/app/Skeleton";
 
 /**
- * Dashboard fallback. Mirrors `page.tsx` block for block — greeting and streak
- * chip, heatmap card, three stat cards, the "Continue" card, the mastery card
+ * Home fallback. Mirrors `page.tsx` block for block — greeting and streak
+ * chip, goal/activity row, two stat cards, the "Continue" card, the mastery card
  * — so the real content drops into boxes that are already the right size and
  * nothing jumps when it swaps in.
  *
@@ -23,26 +23,33 @@ export default function DashboardLoading() {
         <Skeleton className="h-10 w-36 rounded-xl" />
       </header>
 
-      {/* --- Activity heatmap ---------------------------------------------- */}
-      <div className="mt-8 rounded-2xl border border-hairline bg-surface p-6">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <Skeleton className="h-6 w-32" />
-          <Skeleton className="h-4 w-44" />
+      {/* --- Today's goal and recent activity ------------------------------ */}
+      <div className="mt-8 grid items-stretch gap-4 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(0,1.6fr)]">
+        <div className="rounded-2xl border border-hairline bg-surface p-6">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="mt-3 h-12 w-24" />
+          <Skeleton className="mt-4 h-2.5 w-full rounded-full" />
+          <Skeleton className="mt-2 h-4 w-40 max-w-full" />
         </div>
-        <Skeleton className="mt-4 h-24 w-full" />
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="h-4 w-36" />
+
+        <div className="min-w-0 rounded-2xl border border-hairline bg-surface px-3 py-5 sm:p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <Skeleton className="h-6 w-32" />
+            <Skeleton className="h-4 w-44" />
+          </div>
+          <Skeleton className="mt-3 h-24 w-full" />
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-4 w-36" />
+          </div>
         </div>
       </div>
 
       {/* --- Stat cards ----------------------------------------------------
-          Three, matching the page's grid at every breakpoint. The third card
-          spans two columns at `sm` exactly as the real one does. */}
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          Two, matching the page's even two-column grid at `sm` and above. */}
+      <div className="mt-8 grid gap-4 sm:grid-cols-2">
         <StatCard />
         <StatCard />
-        <StatCard className="sm:col-span-2 lg:col-span-1" />
       </div>
 
       {/* --- Continue where you left off ----------------------------------- */}

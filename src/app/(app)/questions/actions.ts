@@ -218,6 +218,47 @@ export async function startQuestionBankSessionAction(): Promise<string | null> {
 }
 
 /**
+ * Ends the caller's open sitting the way an abandoned one is ended.
+ *
+ * Called by the player when it has sat untouched past the idle limit. It is
+ * deliberately NOT `close_question_bank_session`: that one stamps `now()` as
+ * the end, which for an idle timeout would bank the whole time the tab spent
+ * unattended as study time — the very thing the timeout exists to prevent.
+ * `finalize_open_question_bank_sessions()` ends the session at its last
+ * recorded attempt instead, and deletes it outright if nothing was answered.
+ *
+ * Takes no input for the same reason it needs no schema: the database picks
+ * the rows from `auth.uid()`, so there is nothing a caller could name.
+ */
+export async function finalizeQuestionBankSessionsAction(): Promise<void> {
+  try {
+    const supabase = await createSupabaseServerClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const rate = await sessionLimiter.check(user.id);
+    if (!rate.ok) return;
+
+    const { error } = await supabase.rpc(
+      "finalize_open_question_bank_sessions",
+    );
+
+    if (error) {
+      console.error(
+        `[learn] finalize_open_question_bank_sessions failed: ${error.code ?? "no_code"} — ${error.message}`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `[learn] finalize_open_question_bank_sessions threw: ${describeError(error)}`,
+    );
+  }
+}
+
+/**
  * Closes a sitting when the student finishes the set or leaves the player.
  *
  * Best-effort by design, and never awaited on a path the student is waiting

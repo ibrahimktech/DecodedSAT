@@ -135,8 +135,26 @@ export default async function QuestionsPracticePage({
       shuffled={shuffle}
       dailyGoal={stats.dailyGoal}
       answeredToday={answeredToday}
+      idleLimitMs={idleOverrideMs(firstValue(params.idle))}
     />
   );
+}
+
+/**
+ * Development-only: `?idle=45` shortens the player's inactivity limit so the
+ * timeout can be exercised without sitting still for fifteen minutes.
+ *
+ * `NODE_ENV` is inlined at build time, so in production this collapses to a
+ * function that returns undefined and the query param does nothing — a student
+ * cannot lengthen their own limit with it, or shorten it into a nuisance.
+ */
+function idleOverrideMs(raw: string | undefined): number | undefined {
+  if (process.env.NODE_ENV === "production" || raw === undefined) {
+    return undefined;
+  }
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds)) return undefined;
+  return Math.min(900, Math.max(5, Math.round(seconds))) * 1000;
 }
 
 /** A repeated query param is a client we did not write. Take the first. */

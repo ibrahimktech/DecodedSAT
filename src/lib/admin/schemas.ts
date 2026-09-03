@@ -78,6 +78,43 @@ export const SetActiveSchema = z.object({
   active: z.boolean(),
 });
 
+// --- Question reports -------------------------------------------------------
+
+const QuestionReportStatusEnum = z.enum([
+  "open",
+  "reviewed",
+  "resolved",
+  "dismissed",
+]);
+
+const QuestionReportReasonEnum = z.enum(["incorrect", "unclear_or_broken"]);
+
+export const UpdateQuestionReportSchema = z.object({
+  reportId: z.uuid(),
+  status: QuestionReportStatusEnum,
+  adminNote: z.string().max(2000),
+});
+
+export const AdminQuestionReportFiltersSchema = z.object({
+  status: z
+    .enum(["open", "reviewed", "resolved", "dismissed", "all"])
+    .optional()
+    .catch(undefined),
+  reason: QuestionReportReasonEnum.optional().catch(undefined),
+  q: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .refine((value) => !/[\p{Cc}]/u.test(value))
+    .optional()
+    .catch(undefined),
+});
+
+export type AdminQuestionReportFilters = z.infer<
+  typeof AdminQuestionReportFiltersSchema
+>;
+
 // --- Videos ----------------------------------------------------------------------
 
 /** Eleven URL-safe characters — YouTube's id alphabet. */
@@ -226,6 +263,7 @@ const statusParam = z
   .catch(undefined);
 
 export const AdminQuestionFiltersSchema = z.object({
+  id: uuidParam,
   domain: uuidParam,
   subtopic: uuidParam,
   set: uuidParam,

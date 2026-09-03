@@ -7,6 +7,7 @@
  */
 
 import type { Difficulty } from "@/lib/learn/types";
+import type { QuestionReportReason } from "@/lib/learn/types";
 
 /** A question as the admin sees it — answer key included. */
 export type AdminQuestion = {
@@ -23,6 +24,58 @@ export type AdminQuestion = {
   domainId: string;
   domainName: string;
   setName: string | null;
+};
+
+export const QUESTION_REPORT_STATUSES = [
+  "open",
+  "reviewed",
+  "resolved",
+  "dismissed",
+] as const;
+
+export type QuestionReportStatus = (typeof QUESTION_REPORT_STATUSES)[number];
+
+export const QUESTION_REPORT_STATUS_LABELS: Record<
+  QuestionReportStatus,
+  string
+> = {
+  open: "Open",
+  reviewed: "Reviewed",
+  resolved: "Resolved",
+  dismissed: "Dismissed",
+};
+
+export type AdminQuestionReportSummary = {
+  id: string;
+  questionId: string;
+  reason: QuestionReportReason;
+  details: string | null;
+  status: QuestionReportStatus;
+  createdAt: string;
+  reporterName: string | null;
+  reporterEmail: string | null;
+  currentPrompt: string;
+  currentIsActive: boolean;
+  externalId: string | null;
+  questionReportCount: number;
+  openQuestionReportCount: number;
+};
+
+export type QuestionReportSnapshot = {
+  prompt: string;
+  choices: string[];
+  correctChoice: number;
+};
+
+export type AdminQuestionReport = AdminQuestionReportSummary & {
+  userId: string;
+  updatedAt: string;
+  adminNote: string | null;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  reviewerName: string | null;
+  snapshot: QuestionReportSnapshot;
+  currentQuestion: AdminQuestion;
 };
 
 /**

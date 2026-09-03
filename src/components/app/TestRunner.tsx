@@ -12,6 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { submitPracticeAttemptAction } from "@/app/(app)/practice/actions";
+import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { ctaClassName } from "@/components/CtaButton";
 import {
   CHOICE_LETTERS,
@@ -168,6 +169,25 @@ export function TestRunner({
             <span>{choice}</span>
           </button>
         ))}
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <ReportQuestionButton
+          question={question}
+          questionLabel={`Question ${index + 1} of ${questions.length}`}
+          disabled={submitting || timeExpired}
+          onReported={() => {
+            // Section attempts are submitted as one answer map. Removing a
+            // preselected value makes this a genuine skip rather than a wrong
+            // or correct attempt, then normal navigation advances once.
+            setAnswers((current) => {
+              const next = { ...current };
+              delete next[question.id];
+              return next;
+            });
+            if (index + 1 < questions.length) setIndex(index + 1);
+          }}
+        />
       </div>
 
       {error && (

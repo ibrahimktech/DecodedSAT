@@ -20,7 +20,7 @@ import { getViewerTimeZone } from "@/lib/learn/viewer-timezone";
 import { formatSeconds } from "@/lib/learn/types";
 
 export const metadata: Metadata = {
-  title: "Dashboard",
+  title: "Home",
 };
 
 /**
@@ -124,10 +124,34 @@ export default async function DashboardPage() {
         </p>
       </header>
 
-      {/* --- Activity heatmap ---------------------------------------------
-          Sits directly under the streak it explains: the streak says how many
-          days in a row, this says what those days actually looked like. */}
-      <div className="mt-8">
+      {/* --- Today's goal and recent activity -----------------------------
+          Goal comes first in reading order and sits to the left of the wider
+          heatmap on desktop. The grid stacks before either card gets cramped. */}
+      <div className="mt-8 grid items-stretch gap-4 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(0,1.6fr)]">
+        <article className="flex h-full flex-col rounded-2xl border border-hairline bg-surface p-6">
+          <h2 className="text-[0.9375rem] font-semibold text-muted">
+            Today&apos;s goal
+          </h2>
+          <p className="mt-2 font-display text-5xl font-extrabold text-ink">
+            {todayCount}
+            <span className="text-2xl text-muted"> / {stats.dailyGoal}</span>
+          </p>
+          <div
+            role="progressbar"
+            aria-valuenow={todayCount}
+            aria-valuemin={0}
+            aria-valuemax={stats.dailyGoal}
+            aria-label="Questions answered today"
+            className="mt-4 h-2.5 overflow-hidden rounded-full bg-background"
+          >
+            <div
+              className="h-full rounded-full bg-accent"
+              style={{ width: `${goalProgress}%` }}
+            />
+          </div>
+          <p className="mt-2 text-sm text-muted">questions answered today</p>
+        </article>
+
         <ActivityHeatmap
           cells={heatmapCells}
           activity={activity}
@@ -138,7 +162,7 @@ export default async function DashboardPage() {
       {/* --- Stat cards ---------------------------------------------------- */}
       <section
         aria-label="Your stats"
-        className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        className="mt-8 grid gap-4 sm:grid-cols-2"
       >
         <article className="rounded-2xl border border-hairline bg-surface p-6">
           <h2 className="text-[0.9375rem] font-semibold text-muted">
@@ -185,29 +209,6 @@ export default async function DashboardPage() {
           )}
         </article>
 
-        <article className="rounded-2xl border border-hairline bg-surface p-6 sm:col-span-2 lg:col-span-1">
-          <h2 className="text-[0.9375rem] font-semibold text-muted">
-            Today&apos;s goal
-          </h2>
-          <p className="mt-2 font-display text-5xl font-extrabold text-ink">
-            {todayCount}
-            <span className="text-2xl text-muted"> / {stats.dailyGoal}</span>
-          </p>
-          <div
-            role="progressbar"
-            aria-valuenow={todayCount}
-            aria-valuemin={0}
-            aria-valuemax={stats.dailyGoal}
-            aria-label="Questions answered today"
-            className="mt-3 h-2.5 overflow-hidden rounded-full bg-background"
-          >
-            <div
-              className="h-full rounded-full bg-accent"
-              style={{ width: `${goalProgress}%` }}
-            />
-          </div>
-          <p className="mt-2 text-sm text-muted">questions answered today</p>
-        </article>
       </section>
 
       {/* --- Continue where you left off ----------------------------------- */}

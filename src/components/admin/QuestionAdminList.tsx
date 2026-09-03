@@ -30,9 +30,17 @@ type Props = {
   questions: AdminQuestion[];
   domains: Domain[];
   subtopics: Subtopic[];
+  initialEditingId?: string;
+  returnTo?: string;
 };
 
-export function QuestionAdminList({ questions, domains, subtopics }: Props) {
+export function QuestionAdminList({
+  questions,
+  domains,
+  subtopics,
+  initialEditingId,
+  returnTo,
+}: Props) {
   if (questions.length === 0) {
     return (
       <div className="rounded-2xl border border-hairline bg-surface px-6 py-10 text-center text-[0.9375rem] text-muted">
@@ -50,6 +58,8 @@ export function QuestionAdminList({ questions, domains, subtopics }: Props) {
           question={question}
           domains={domains}
           subtopics={subtopics}
+          initiallyEditing={question.id === initialEditingId}
+          returnTo={returnTo}
         />
       ))}
     </ul>
@@ -60,13 +70,17 @@ function QuestionRow({
   question,
   domains,
   subtopics,
+  initiallyEditing,
+  returnTo,
 }: {
   question: AdminQuestion;
   domains: Domain[];
   subtopics: Subtopic[];
+  initiallyEditing: boolean;
+  returnTo?: string;
 }) {
   const router = useRouter();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(initiallyEditing);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -87,6 +101,7 @@ function QuestionRow({
 
   return (
     <li
+      id={`question-${question.id}`}
       className={`rounded-2xl border bg-surface p-4 ${
         question.isActive ? "border-hairline" : "border-miss-hairline"
       }`}
@@ -168,7 +183,11 @@ function QuestionRow({
           subtopics={subtopics}
           onSaved={() => {
             setEditing(false);
-            router.refresh();
+            if (returnTo) {
+              router.push(returnTo);
+            } else {
+              router.refresh();
+            }
           }}
         />
       )}

@@ -61,6 +61,18 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    href: "/admin/question-reports",
+    label: "Question Reports",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <path d="M5 21V4" />
+        <path d="M5 5h10l-1.5 3L15 11H5" />
+        <circle cx="18" cy="17" r="3" />
+        <path d="M18 15.5v1.8M18 18.5h.01" />
+      </svg>
+    ),
+  },
+  {
     href: "/admin/videos",
     label: "Videos",
     icon: (
@@ -128,7 +140,7 @@ function itemClassName(active: boolean): string {
     : `${base} text-muted hover:bg-background hover:text-ink`;
 }
 
-export function AdminNav() {
+export function AdminNav({ openReportCount = 0 }: { openReportCount?: number }) {
   const pathname = usePathname();
 
   const isActive = (item: NavItem) =>
@@ -142,10 +154,19 @@ export function AdminNav() {
       href={item.href}
       aria-current={isActive(item) ? "page" : undefined}
       className={itemClassName(isActive(item))}
-      title={item.label}
+      title={
+        item.href === "/admin/question-reports" && openReportCount > 0
+          ? `${item.label} (${openReportCount} open)`
+          : item.label
+      }
     >
       <span className="shrink-0">{item.icon}</span>
       <span className="hidden lg:inline">{item.label}</span>
+      {item.href === "/admin/question-reports" && openReportCount > 0 && (
+        <span className="ml-auto min-w-5 rounded-full bg-insight-chip px-1.5 py-0.5 text-center text-[0.6875rem] font-bold leading-none text-insight-dark">
+          {openReportCount > 99 ? "99+" : openReportCount}
+        </span>
+      )}
     </Link>
   );
 

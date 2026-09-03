@@ -18,9 +18,9 @@
 
 import { useActionState, useState } from "react";
 import { updateStudyPlanAction } from "@/app/(app)/settings/actions";
-import { AuthField } from "@/components/auth/AuthField";
 import { FormMessage } from "@/components/auth/FormMessage";
 import { ctaClassName } from "@/components/CtaButton";
+import { OfficialSatDateField } from "@/components/onboarding/OfficialSatDateField";
 import { SelectField } from "@/components/onboarding/SelectField";
 import { type AuthFormState, initialAuthFormState } from "@/lib/auth/state";
 import {
@@ -141,17 +141,12 @@ function StudyPlanFields({
         disabled={pending}
       />
 
-      <AuthField
+      <OfficialSatDateField
         label="Test date"
         name="testDate"
-        type="date"
-        autoComplete="off"
-        required={false}
         value={values.testDate}
         onChange={set("testDate")}
-        onBlur={() => setTouched(true)}
         error={errorFor("testDate")}
-        hint="Leave blank if you haven't booked one."
         disabled={pending}
       />
 

@@ -32,6 +32,18 @@
   --color-insight-chip: #fdecd3; /* amber tag background */
   --color-accent-chip: #e4f4ec; /* green tag background */
 
+  /* -- Signed-in nav rail ------------------------------------------------ */
+  /* The rail is a flat panel of brand green, so the page palette's ink and
+     muted are unreadable on it and it needs its own on-green names. Aliases,
+     not new hues — every value here is one of the core colours above, so the
+     rail cannot drift away from the brand. */
+  --color-nav-surface: var(--color-accent); /* the rail itself */
+  --color-nav-hairline: var(--color-accent-hover); /* its edge and dividers */
+  --color-nav-hover: var(--color-accent-hover); /* hover fill on the rail */
+  --color-nav-ink: var(--color-surface); /* labels and icons on the green */
+  --color-nav-active: var(--color-surface); /* the current page's pill */
+  --color-nav-active-ink: var(--color-accent-hover); /* text inside that pill */
+
   /* The one wrong answer in the step-1 demo. */
   --color-miss-surface: #fde7dc;
   --color-miss-hairline: #e9b39c;

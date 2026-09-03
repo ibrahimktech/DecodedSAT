@@ -145,7 +145,9 @@ export async function updateStudyPlanAction(
     const parsed = StudyPlanSchema.safeParse({
       targetScore: formData.get("targetScore"),
       dailyGoal: formData.get("dailyGoal"),
-      testDate: formData.get("testDate"),
+      // A native select whose disabled placeholder is selected can be absent
+      // from FormData. In this form that state means "not sure yet".
+      testDate: formData.get("testDate") ?? "",
     });
     if (!parsed.success) return failed;
 

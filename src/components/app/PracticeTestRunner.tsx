@@ -50,6 +50,7 @@ import {
 } from "@/app/(app)/practice/tests/actions";
 import { CalculatorPanel } from "@/components/app/CalculatorPanel";
 import { MathText } from "@/components/app/MathText";
+import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { ChoiceList } from "@/components/app/exam/ChoiceList";
 import { ExamShell, examButtonClassName } from "@/components/app/exam/ExamShell";
 import { ExamTimer } from "@/components/app/exam/ExamTimer";
@@ -420,6 +421,21 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
           crossed={flags.crossedFor(question.id)}
           onToggleCross={(choice) => flags.toggleCross(question.id, choice)}
           eliminating={eliminating}
+        />
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <ReportQuestionButton
+          question={question}
+          questionLabel={`Question ${index + 1} of ${state.questions.length}`}
+          disabled={busy || remaining <= 0}
+          onReported={() => {
+            // Reporting never writes a response. Existing autosaves remain
+            // authoritative if the student had already selected an answer;
+            // otherwise the reported item stays unanswered and follows the
+            // test's existing scoring rule at module submission.
+            if (!isLast) setIndex((current) => current + 1);
+          }}
         />
       </div>
 

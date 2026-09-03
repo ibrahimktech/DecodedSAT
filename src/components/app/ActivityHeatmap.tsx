@@ -99,7 +99,7 @@ export function ActivityHeatmap({
   return (
     <section
       aria-label="Practice activity, last 12 weeks"
-      className="rounded-2xl border border-hairline bg-surface p-6"
+      className="min-w-0 rounded-2xl border border-hairline bg-surface px-3 py-5 sm:p-5"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-display text-lg font-bold text-ink">
@@ -113,7 +113,7 @@ export function ActivityHeatmap({
 
       <HeatmapGrid weeks={weeks} weekdayLabels={WEEKDAY_LABELS} />
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/progress"
           className="text-sm font-semibold text-accent transition-colors hover:text-accent-hover"

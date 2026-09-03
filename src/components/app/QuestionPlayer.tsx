@@ -59,6 +59,15 @@
  * not the player, and computes its counts from the attempts that exist. The
  * stopwatch is informational only — it counts up, has no limit, and submits
  * nothing.
+ *
+ * ## Idle timeout
+ *
+ * A tab left open is the case neither of those covers: nothing closes, and the
+ * stopwatch keeps counting an empty room. So the player watches for signs of
+ * life and, after `IDLE_LIMIT_MS` without one, ends the sitting itself — clock
+ * rolled back to the last real activity, session finalized at its last recorded
+ * attempt. A minute of warning comes first, because the alternative is yanking
+ * a set out from under someone who was reading.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -66,12 +75,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   closeQuestionBankSessionAction,
+  finalizeQuestionBankSessionsAction,
   loadQuestionsAction,
   startQuestionBankSessionAction,
   submitQuestionAttemptAction,
 } from "@/app/(app)/questions/actions";
 import { CalculatorPanel } from "@/components/app/CalculatorPanel";
 import { MathText } from "@/components/app/MathText";
+import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { Skeleton } from "@/components/app/Skeleton";
 import { ChoiceList } from "@/components/app/exam/ChoiceList";
 import { ExamShell, examButtonClassName } from "@/components/app/exam/ExamShell";
@@ -104,6 +115,42 @@ type AnsweredRecord = { selected: number; verdict: OkVerdict };
 const LOOK_BEHIND = 5;
 const LOOK_AHEAD = 20;
 
+/**
+ * How long the page may sit untouched before the sitting ends itself, and how
+ * much warning comes first.
+ *
+ * A set has no deadline, and should not have one — but "no deadline" used to
+ * mean a tab left open all afternoon kept its session open and its stopwatch
+ * running, and Progress then reported the whole afternoon as study time.
+ * Fifteen minutes is longer than any one question takes and shorter than a walk
+ * away from the desk, so a page that quiet means nobody is there.
+ */
+const IDLE_LIMIT_MS = 15 * 60_000;
+const IDLE_WARNING_MS = 60_000;
+
+/**
+ * What counts as a sign of life. Clicks, keys, scrolling and touches only —
+ * deliberately not `mousemove`, which a nudged desk fires, and not
+ * `visibilitychange`, since coming back to a tab is not the same as having
+ * been there.
+ */
+const ACTIVITY_EVENTS = [
+  "pointerdown",
+  "keydown",
+  "wheel",
+  "touchstart",
+] as const;
+
+/** The idle limit in prose: "15 minutes", or "45 seconds" under an override. */
+function describeIdleLimit(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds >= 60 && seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  return `${seconds} seconds`;
+}
+
 type QuestionPlayerProps = {
   /** Every question in the set, in order, without content. */
   entries: QuestionIndexEntry[];
@@ -116,6 +163,12 @@ type QuestionPlayerProps = {
   /** The student's daily target, and how much of it today already had. */
   dailyGoal: number;
   answeredToday: number;
+  /**
+   * Development-only override of the inactivity limit, in milliseconds. Exists
+   * so the timeout can be exercised in a minute rather than in fifteen; the
+   * page only ever supplies it outside production.
+   */
+  idleLimitMs?: number;
 };
 
 export function QuestionPlayer({
@@ -125,8 +178,14 @@ export function QuestionPlayer({
   shuffled = false,
   dailyGoal,
   answeredToday,
+  idleLimitMs,
 }: QuestionPlayerProps) {
   const router = useRouter();
+
+  const idleLimit = idleLimitMs ?? IDLE_LIMIT_MS;
+  // A shortened limit must not put the warning up before the sitting starts,
+  // so the notice window can never be more than half of it.
+  const idleWarning = Math.min(IDLE_WARNING_MS, Math.floor(idleLimit / 2));
 
   const [index, setIndex] = useState(0);
   const [loaded, setLoaded] = useState<Record<string, PlayableQuestion>>(() =>
@@ -155,6 +214,10 @@ export function QuestionPlayer({
   const [elapsed, setElapsed] = useState(0);
   const [timerHidden, setTimerHidden] = useState(false);
   const [paused, setPaused] = useState(false);
+  /** Set once the sitting has ended itself for inactivity. */
+  const [timedOut, setTimedOut] = useState(false);
+  /** Seconds left before that happens, while the warning is up; else null. */
+  const [idleCountdown, setIdleCountdown] = useState<number | null>(null);
   const [eliminating, setEliminating] = useState(false);
   /** The running total when the goal was passed, or null while it has not. */
   const [goalBanner, setGoalBanner] = useState<number | null>(null);
@@ -184,6 +247,16 @@ export function QuestionPlayer({
   const startedAtRef = useRef<number | null>(null);
   const pausedTotalRef = useRef(0);
   const pausedAtRef = useRef<number | null>(null);
+
+  /**
+   * When the page was last touched, and the clock's reading at that moment.
+   * Null until the idle effect seeds it on mount — reading a clock during
+   * render is exactly the impurity that makes a re-render mean something.
+   */
+  const lastActivityRef = useRef<number | null>(null);
+  const activeElapsedRef = useRef(0);
+  /** Bumped to open a fresh sitting in place after an idle timeout. */
+  const [sessionEpoch, setSessionEpoch] = useState(0);
 
   const record = entry ? history[entry.id] : undefined;
   const selected = entry ? (selections[entry.id] ?? null) : null;
@@ -222,7 +295,7 @@ export function QuestionPlayer({
       cancelled = true;
       endSession();
     };
-  }, [endSession]);
+  }, [endSession, sessionEpoch]);
 
   // --- Keeping content ahead of the cursor ----------------------------------
   useEffect(() => {
@@ -287,22 +360,105 @@ export function QuestionPlayer({
   // than incremented, so a tab that gets throttled in the background resumes
   // showing the real elapsed time instead of however many ticks it was allowed
   // to run.
+  /** What the clock reads now. Also what the idle timeout rolls back to. */
+  const elapsedSecondsNow = useCallback(() => {
+    const startedAt = startedAtRef.current;
+    if (startedAt === null) return 0;
+    const openPause =
+      pausedAtRef.current === null ? 0 : Date.now() - pausedAtRef.current;
+    return Math.max(
+      0,
+      Math.floor(
+        (Date.now() - startedAt - pausedTotalRef.current - openPause) / 1000,
+      ),
+    );
+  }, []);
+
   useEffect(() => {
     startedAtRef.current ??= Date.now();
-    if (finished || paused) return;
+    if (finished || timedOut || paused) return;
 
-    const tick = () => {
-      const startedAt = startedAtRef.current;
-      if (startedAt === null) return;
-      setElapsed(
-        Math.floor((Date.now() - startedAt - pausedTotalRef.current) / 1000),
-      );
-    };
+    const tick = () => setElapsed(elapsedSecondsNow());
 
     tick();
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
-  }, [finished, paused]);
+  }, [elapsedSecondsNow, finished, timedOut, paused]);
+
+  // --- Idle timeout ---------------------------------------------------------
+  // Ends the sitting when nobody is there. `finalizeQuestionBankSessionsAction`
+  // rather than the ordinary close: that one stamps `now()` as the end, which
+  // would bank the idle stretch as study time — the thing this exists to stop.
+  const endForIdle = useCallback(() => {
+    sessionRef.current = null;
+    setSessionId(null);
+    setIdleCountdown(null);
+    setElapsed(activeElapsedRef.current);
+    setPaused(false);
+    setTimedOut(true);
+    void finalizeQuestionBankSessionsAction();
+  }, []);
+
+  useEffect(() => {
+    if (finished || timedOut) return;
+
+    const noteActivity = () => {
+      lastActivityRef.current = Date.now();
+      activeElapsedRef.current = elapsedSecondsNow();
+      // Returns the same `null` while no warning is up, so React bails out
+      // rather than re-rendering the player on every keystroke.
+      setIdleCountdown((current) => (current === null ? current : null));
+    };
+
+    // Measured against a timestamp rather than counted down, so a backgrounded
+    // tab whose interval is throttled still ends at the right moment instead of
+    // whenever it was next allowed to run.
+    const check = () => {
+      const lastActivity = lastActivityRef.current;
+      if (lastActivity === null) return;
+      const idleFor = Date.now() - lastActivity;
+      if (idleFor >= idleLimit) {
+        endForIdle();
+        return;
+      }
+      const untilEnd = idleLimit - idleFor;
+      setIdleCountdown(
+        untilEnd <= idleWarning ? Math.ceil(untilEnd / 1000) : null,
+      );
+    };
+
+    noteActivity();
+    for (const event of ACTIVITY_EVENTS) {
+      window.addEventListener(event, noteActivity, { passive: true });
+    }
+    const timer = window.setInterval(check, 1000);
+
+    return () => {
+      for (const event of ACTIVITY_EVENTS) {
+        window.removeEventListener(event, noteActivity);
+      }
+      window.clearInterval(timer);
+    };
+  }, [elapsedSecondsNow, endForIdle, finished, idleLimit, idleWarning, timedOut]);
+
+  /**
+   * Picks the set back up after a timeout, in place.
+   *
+   * The clock resumes from where it froze rather than from zero — the work
+   * before the break was real — and the epoch bump opens a new session row, so
+   * the attempts either side of the gap are two sittings, which is what they
+   * are.
+   */
+  function resumeAfterIdle() {
+    const carried = activeElapsedRef.current;
+    startedAtRef.current = Date.now() - carried * 1000;
+    pausedTotalRef.current = 0;
+    pausedAtRef.current = null;
+    lastActivityRef.current = Date.now();
+    setElapsed(carried);
+    setTimedOut(false);
+    setSessionEpoch((epoch) => epoch + 1);
+  }
 
   function togglePaused() {
     if (pausedAtRef.current === null) {
@@ -367,6 +523,41 @@ export function QuestionPlayer({
     endSession();
   }
 
+  if (timedOut) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4 py-10">
+        <section className="w-full max-w-xl rounded-2xl border border-hairline bg-surface p-8 text-center">
+          <h2 className="font-display text-2xl font-bold text-ink">
+            Stopped while you were away
+          </h2>
+          <p className="mt-2 text-lg text-muted">
+            Nothing happened here for {describeIdleLimit(idleLimit)}, so this
+            sitting ended and the clock stopped at{" "}
+            <strong className="text-ink">{formatDuration(elapsed)}</strong> —
+            the time you were actually working, not the time the tab was open.
+          </p>
+          <p className="mt-2 text-[0.9375rem] text-muted">
+            {answeredCount === 0
+              ? "Nothing was answered, so nothing was recorded."
+              : `Your ${answeredCount} ${answeredCount === 1 ? "answer is" : "answers are"} saved, and the set is exactly where you left it.`}
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={resumeAfterIdle}
+              className={ctaClassName("primary")}
+            >
+              Resume practicing
+            </button>
+            <Link href={changeFiltersHref} className={ctaClassName("secondary")}>
+              Change topics
+            </Link>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   if (finished) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 py-10">
@@ -423,6 +614,51 @@ export function QuestionPlayer({
       };
     },
   );
+
+  // Rendered by `shell()` rather than beside the question, so it still appears
+  // while a window is loading or a question turned out to be unavailable —
+  // those states are just as capable of being walked away from.
+  const idleWarningDialog =
+    idleCountdown === null ? null : (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="idle-warning-heading"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
+      >
+        <div className="w-full max-w-md rounded-2xl border border-hairline bg-surface p-6">
+          <h2
+            id="idle-warning-heading"
+            className="font-display text-xl font-bold text-ink"
+          >
+            Still there?
+          </h2>
+          <p className="mt-2 text-[0.9375rem] leading-relaxed text-muted">
+            This sitting ends in{" "}
+            <strong className="tabular-nums text-ink">{idleCountdown}s</strong>{" "}
+            because nothing has happened for a while — that keeps your study
+            time honest. Press anything to carry on; everything you have
+            answered is already saved either way.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={endForIdle}
+              className={examButtonClassName("secondary")}
+            >
+              End it now
+            </button>
+            <button
+              type="button"
+              onClick={() => setIdleCountdown(null)}
+              className={examButtonClassName("primary")}
+            >
+              I&apos;m still here
+            </button>
+          </div>
+        </div>
+      </div>
+    );
 
   const shell = (children: React.ReactNode) => (
     <ExamShell
@@ -500,6 +736,7 @@ export function QuestionPlayer({
       }
     >
       {children}
+      {idleWarningDialog}
     </ExamShell>
   );
 
@@ -641,6 +878,21 @@ export function QuestionPlayer({
           eliminating={eliminating}
           correctChoice={record ? record.verdict.correctChoice : null}
           disabled={submitting}
+        />
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <ReportQuestionButton
+          question={question}
+          questionLabel={`Question ${index + 1} of ${entries.length}`}
+          disabled={submitting}
+          onReported={() => {
+            // A report is a skip: no attempt row, verdict, goal progress, or
+            // accuracy change. On the final item, the existing Finish control
+            // remains the session-completion path rather than inventing an
+            // out-of-range next question.
+            if (!isLast) goTo(index + 1);
+          }}
         />
       </div>
 

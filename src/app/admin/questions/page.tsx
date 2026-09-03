@@ -32,6 +32,7 @@ export default async function AdminQuestionsPage({
     typeof params[key] === "string" ? (params[key] as string) : undefined;
 
   const filters = AdminQuestionFiltersSchema.parse({
+    id: single("id"),
     domain: single("domain"),
     subtopic: single("subtopic"),
     set: single("set"),
@@ -39,6 +40,10 @@ export default async function AdminQuestionsPage({
     status: single("status"),
     q: single("q"),
   });
+
+  const initialEditingId =
+    single("edit") === filters.id ? filters.id : undefined;
+  const returnTo = safeReportReturnPath(single("returnTo"));
 
   const [domains, subtopics, sets, questions] = await Promise.all([
     getDomains(supabase),
@@ -166,10 +171,21 @@ export default async function AdminQuestionsPage({
           questions={questions}
           domains={domains}
           subtopics={subtopics}
+          initialEditingId={initialEditingId}
+          returnTo={returnTo}
         />
       </section>
     </div>
   );
+}
+
+function safeReportReturnPath(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return /^\/admin\/question-reports\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  )
+    ? value
+    : undefined;
 }
 
 function FilterSelect({

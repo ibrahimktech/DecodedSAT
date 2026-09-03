@@ -128,8 +128,8 @@ export function HeatmapGrid({
 
   return (
     <>
-      <div className="mt-4 overflow-x-auto" onPointerLeave={hide}>
-        <div className="flex gap-2">
+      <div className="mt-3 overflow-x-auto" onPointerLeave={hide}>
+        <div className="flex gap-1 sm:gap-2">
           <ul
             aria-hidden
             className="flex shrink-0 flex-col gap-1 pt-0.5 text-[0.625rem] leading-[0.875rem] font-medium text-muted"
@@ -141,7 +141,7 @@ export function HeatmapGrid({
             ))}
           </ul>
 
-          <div className="flex gap-1">
+          <div className="flex gap-[3px] sm:gap-1">
             {weeks.map((week, weekIndex) => (
               <div key={weekIndex} className="flex flex-col gap-1">
                 {week.map((cell, dayIndex) =>

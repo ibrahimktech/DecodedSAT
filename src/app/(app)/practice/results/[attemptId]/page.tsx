@@ -57,7 +57,7 @@ export default async function PracticeResultsPage({
             Back to practice tests
           </Link>
           <Link href="/dashboard" className={ctaClassName("secondary")}>
-            Dashboard
+            Home
           </Link>
         </div>
       </section>

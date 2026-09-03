@@ -90,10 +90,19 @@ export async function completeOnboardingAction(
 
     // `FormData.get` yields `string | File | null`; the schema rejects all
     // three non-string cases without any pre-checking here.
+    const satAttempts = formData.get("satAttempts");
+    const lastSatMathScore = formData.get("lastSatMathScore");
+    const numericAttempts = Number(satAttempts);
+
     const parsed = OnboardingSchema.safeParse({
-      satAttempts: formData.get("satAttempts"),
-      lastSatMathScore: formData.get("lastSatMathScore"),
-      currentScoreEstimate: formData.get("currentScoreEstimate"),
+      satAttempts,
+      lastSatMathScore,
+      // A recent real score replaces an estimate as the baseline. Deriving it
+      // here means a stale or hand-written hidden value cannot win.
+      currentScoreEstimate:
+        Number.isInteger(numericAttempts) && numericAttempts > 0
+          ? lastSatMathScore
+          : formData.get("currentScoreEstimate"),
       targetScore: formData.get("targetScore"),
       testDate: formData.get("testDate"),
       // One hidden input per selected domain.

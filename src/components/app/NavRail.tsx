@@ -12,6 +12,11 @@
  * two things: the full/half tests added in step 7 and the section drills from
  * step 4. Naming it after only one of them would bury the other.
  *
+ * The rail is a flat panel of brand green so it reads as the app's spine
+ * rather than as more page. Nothing here names a colour directly: the on-green
+ * values live as `nav-*` theme tokens in `globals.css`, which are aliases of
+ * the core palette, so the rail can be re-toned in one place.
+ *
  * Client component only for `usePathname()` (active-state highlighting); the
  * sign-out form posts straight to the existing Server Action.
  */
@@ -44,7 +49,7 @@ const ICON_PROPS = {
 const NAV_ITEMS: NavItem[] = [
   {
     href: "/dashboard",
-    label: "Dashboard",
+    label: "Home",
     icon: (
       <svg {...ICON_PROPS}>
         <path d="M3 10.5 12 3l9 7.5" />
@@ -117,11 +122,15 @@ const LOGOUT_ICON = (
 
 function itemClassName(active: boolean): string {
   const base =
-    "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[0.9375rem] font-medium transition-colors " +
-    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+    "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[0.9375rem] transition-colors " +
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-nav-ink";
+  // On the green rail the current page is a white pill — the strongest signal
+  // available against a flat fill — and everything else is white on green,
+  // deepening to the darker brand green on hover. The weight is set in each
+  // branch rather than in `base` so the two never both apply.
   return active
-    ? `${base} bg-accent-chip text-accent`
-    : `${base} text-muted hover:bg-background hover:text-ink`;
+    ? `${base} bg-nav-active font-semibold text-nav-active-ink`
+    : `${base} font-medium text-nav-ink hover:bg-nav-hover`;
 }
 
 export function NavRail() {
@@ -150,13 +159,13 @@ export function NavRail() {
   );
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[4.25rem] shrink-0 flex-col border-r border-hairline bg-surface px-2 py-5 lg:w-64 lg:px-4">
+    <aside className="sticky top-0 flex h-screen w-[4.25rem] shrink-0 flex-col border-r border-nav-hairline bg-nav-surface px-2 py-5 lg:w-64 lg:px-4">
       <Link
         href="/dashboard"
-        className="mb-6 flex items-center gap-2.5 rounded-xl px-2 py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="mb-6 flex items-center gap-2.5 rounded-xl px-2 py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-nav-ink"
       >
         <FoxMascot variant="head" className="h-9 w-auto" />
-        <span className="hidden font-display text-xl font-extrabold text-ink lg:inline">
+        <span className="hidden font-display text-xl font-extrabold text-nav-ink lg:inline">
           DecodedSAT
         </span>
       </Link>
@@ -170,7 +179,7 @@ export function NavRail() {
         {renderItem(SETTINGS_ITEM)}
 
         {/* Hairline before logout: leaving the app is not another page. */}
-        <form action={signOutAction} className="mt-2 border-t border-hairline pt-2">
+        <form action={signOutAction} className="mt-2 border-t border-white pt-2">
           <button type="submit" className={`${itemClassName(false)} w-full`}>
             <span className="shrink-0">{LOGOUT_ICON}</span>
             <span className="hidden lg:inline">Log out</span>

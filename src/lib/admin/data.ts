@@ -20,12 +20,18 @@ import type { Difficulty } from "@/lib/learn/types";
 import type {
   AdminPracticeTest,
   AdminQuestion,
+  AdminQuestionReport,
+  AdminQuestionReportSummary,
   AdminUserRow,
   AdminVideo,
   AdminVideoCategory,
   QuestionSetOption,
 } from "./types";
-import type { AdminQuestionFilters, AdminVideoFilters } from "./schemas";
+import type {
+  AdminQuestionFilters,
+  AdminQuestionReportFilters,
+  AdminVideoFilters,
+} from "./schemas";
 
 function logQueryError(label: string, error: unknown): void {
   console.error(`[admin] ${label} failed: ${describeError(error)}`);
@@ -130,7 +136,9 @@ export async function listAdminQuestions(
   const status = filters.status ?? "active";
   if (status !== "all") query = query.eq("is_active", status === "active");
 
-  if (filters.subtopic) {
+  if (filters.id) {
+    query = query.eq("id", filters.id);
+  } else if (filters.subtopic) {
     query = query.eq("subtopic_id", filters.subtopic);
   } else if (filters.domain) {
     query = query.eq("domain_id", filters.domain);
@@ -178,6 +186,224 @@ export async function listAdminQuestions(
       setName: row.set_name,
     }))
     .filter((question) => question.choices.length === 4);
+}
+
+// --- Question reports -------------------------------------------------------
+
+type QuestionReportSummaryRow = {
+  id: string;
+  question_id: string;
+  reason: AdminQuestionReportSummary["reason"];
+  details: string | null;
+  status: AdminQuestionReportSummary["status"];
+  created_at: string;
+  reporter_name: string | null;
+  reporter_email: string | null;
+  current_prompt: string;
+  current_is_active: boolean;
+  external_id: string | null;
+  question_report_count: number | string;
+  open_question_report_count: number | string;
+};
+
+function mapQuestionReportSummary(
+  row: QuestionReportSummaryRow,
+): AdminQuestionReportSummary {
+  return {
+    id: row.id,
+    questionId: row.question_id,
+    reason: row.reason,
+    details: row.details,
+    status: row.status,
+    createdAt: row.created_at,
+    reporterName: row.reporter_name,
+    reporterEmail: row.reporter_email,
+    currentPrompt: row.current_prompt,
+    currentIsActive: row.current_is_active,
+    externalId: row.external_id,
+    questionReportCount: Number(row.question_report_count),
+    openQuestionReportCount: Number(row.open_question_report_count),
+  };
+}
+
+const REPORT_SUMMARY_COLUMNS =
+  "id, question_id, reason, details, status, created_at, reporter_name, " +
+  "reporter_email, current_prompt, current_is_active, external_id, " +
+  "question_report_count, open_question_report_count";
+
+export async function listAdminQuestionReports(
+  supabase: SupabaseClient,
+  filters: AdminQuestionReportFilters,
+): Promise<AdminQuestionReportSummary[]> {
+  let query = supabase
+    .from("admin_question_reports")
+    .select(REPORT_SUMMARY_COLUMNS)
+    .limit(200);
+
+  const status = filters.status ?? "open";
+  if (status !== "all") query = query.eq("status", status);
+  if (filters.reason) query = query.eq("reason", filters.reason);
+
+  if (filters.q) {
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(filters.q)) {
+      query = query.eq("question_id", filters.q);
+    } else {
+      query = query.ilike(
+        "current_prompt",
+        `%${escapeLikePattern(filters.q)}%`,
+      );
+    }
+  }
+
+  if (status === "all") query = query.order("status_sort");
+  query = query.order("created_at", { ascending: false });
+
+  const { data, error } = await query;
+  if (error) {
+    logQueryError("admin_question_reports", error);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as QuestionReportSummaryRow[]).map(
+    mapQuestionReportSummary,
+  );
+}
+
+export async function getAdminQuestionReport(
+  supabase: SupabaseClient,
+  reportId: string,
+): Promise<AdminQuestionReport | null> {
+  const { data, error } = await supabase
+    .from("admin_question_reports")
+    .select(
+      REPORT_SUMMARY_COLUMNS +
+        ", user_id, updated_at, admin_note, reviewed_at, reviewed_by, " +
+        "reviewer_name, question_snapshot, current_choices, " +
+        "current_correct_choice, current_explanation, current_difficulty, " +
+        "subtopic_id, subtopic_name, domain_id, domain_name, set_name",
+    )
+    .eq("id", reportId)
+    .maybeSingle();
+
+  if (error) {
+    logQueryError("admin_question_report", error);
+    return null;
+  }
+  if (!data) return null;
+
+  const row = data as unknown as QuestionReportSummaryRow & {
+    user_id: string;
+    updated_at: string;
+    admin_note: string | null;
+    reviewed_at: string | null;
+    reviewed_by: string | null;
+    reviewer_name: string | null;
+    question_snapshot: {
+      prompt?: unknown;
+      choices?: unknown;
+      correct_choice?: unknown;
+    };
+    current_choices: unknown;
+    current_correct_choice: number;
+    current_explanation: string;
+    current_difficulty: Difficulty;
+    subtopic_id: string;
+    subtopic_name: string;
+    domain_id: string;
+    domain_name: string;
+    set_name: string | null;
+  };
+
+  const snapshotChoices = toChoices(row.question_snapshot.choices);
+  const currentChoices = toChoices(row.current_choices);
+  if (
+    typeof row.question_snapshot.prompt !== "string" ||
+    !Number.isInteger(row.question_snapshot.correct_choice) ||
+    snapshotChoices.length !== 4 ||
+    currentChoices.length !== 4
+  ) {
+    logQueryError("admin_question_report_shape", "invalid question snapshot");
+    return null;
+  }
+
+  return {
+    ...mapQuestionReportSummary(row),
+    userId: row.user_id,
+    updatedAt: row.updated_at,
+    adminNote: row.admin_note,
+    reviewedAt: row.reviewed_at,
+    reviewedBy: row.reviewed_by,
+    reviewerName: row.reviewer_name,
+    snapshot: {
+      prompt: row.question_snapshot.prompt,
+      choices: snapshotChoices,
+      correctChoice: Number(row.question_snapshot.correct_choice),
+    },
+    currentQuestion: {
+      id: row.question_id,
+      prompt: row.current_prompt,
+      choices: currentChoices,
+      correctChoice: row.current_correct_choice,
+      explanation: row.current_explanation,
+      difficulty: row.current_difficulty,
+      isActive: row.current_is_active,
+      externalId: row.external_id,
+      subtopicId: row.subtopic_id,
+      subtopicName: row.subtopic_name,
+      domainId: row.domain_id,
+      domainName: row.domain_name,
+      setName: row.set_name,
+    },
+  };
+}
+
+export async function listOtherOpenQuestionReports(
+  supabase: SupabaseClient,
+  questionId: string,
+  excludingReportId: string,
+): Promise<AdminQuestionReportSummary[]> {
+  const { data, error } = await supabase
+    .from("admin_question_reports")
+    .select(REPORT_SUMMARY_COLUMNS)
+    .eq("question_id", questionId)
+    .eq("status", "open")
+    .neq("id", excludingReportId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    logQueryError("other_open_question_reports", error);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as QuestionReportSummaryRow[]).map(
+    mapQuestionReportSummary,
+  );
+}
+
+export type QuestionReportCounts = {
+  openReports: number;
+  uniqueOpenQuestions: number;
+};
+
+export async function getQuestionReportCounts(
+  supabase: SupabaseClient,
+): Promise<QuestionReportCounts> {
+  const { data, error } = await supabase.rpc("admin_question_report_counts");
+  if (error) {
+    logQueryError("admin_question_report_counts", error);
+    return { openReports: 0, uniqueOpenQuestions: 0 };
+  }
+
+  const row = (data as Array<{
+    open_reports: number | string;
+    unique_open_questions: number | string;
+  }> | null)?.[0];
+
+  return {
+    openReports: Number(row?.open_reports ?? 0),
+    uniqueOpenQuestions: Number(row?.unique_open_questions ?? 0),
+  };
 }
 
 // --- Videos ----------------------------------------------------------------------

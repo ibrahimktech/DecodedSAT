@@ -16,25 +16,32 @@
  * The Zod parsing here decides whether "Next" is enabled and nothing more. The
  * action re-parses the same schema, and `complete_onboarding()` re-checks every
  * range again inside the database.
+ *
+ * Question 2 is the only branch: a real recent Math score for students who
+ * have sat the SAT, or an estimate for students who have not. Both routes
+ * remain six questions long, so progress never jumps or lies.
  */
 
 import { useActionState, useState } from "react";
 import { completeOnboardingAction } from "@/app/onboarding/actions";
 import { ctaClassName } from "@/components/CtaButton";
-import { AuthField } from "@/components/auth/AuthField";
 import { FormMessage } from "@/components/auth/FormMessage";
 import { ChoiceCard } from "@/components/onboarding/ChoiceCard";
+import { OfficialSatDateField } from "@/components/onboarding/OfficialSatDateField";
+import { SatScoreInput } from "@/components/onboarding/SatScoreInput";
 import { SelectField } from "@/components/onboarding/SelectField";
 import { initialAuthFormState } from "@/lib/auth/state";
 import type { Domain } from "@/lib/learn/types";
 import {
   DAILY_GOAL_OPTIONS,
   MAX_FOCUS_DOMAINS,
+  RECENT_SCORE_STEP_SCHEMA,
   SAT_ATTEMPT_OPTIONS,
   SCORE_BUCKETS,
   STEP_COUNT,
   STEP_SCHEMAS,
 } from "@/lib/onboarding/schemas";
+import { formatOfficialSatDate } from "@/lib/onboarding/sat-dates";
 
 /**
  * Everything is a string, because that is what an input holds and what
@@ -60,17 +67,11 @@ const EMPTY_ANSWERS: Answers = {
   dailyGoal: "",
 };
 
-/** The estimate and target are picked in 50-point buckets. */
+/** The target retains the existing 50-point buckets. */
 const BUCKET_OPTIONS = SCORE_BUCKETS.map((score) => ({
   value: String(score),
   label: String(score),
 }));
-
-/** The one field where they know the real number gets the full 10-point grid. */
-const EXACT_SCORE_OPTIONS = Array.from({ length: 61 }, (_, index) => {
-  const score = 200 + index * 10;
-  return { value: String(score), label: String(score) };
-});
 
 const GOAL_HINTS: Record<number, string> = {
   10: "About 8 minutes a day",
@@ -96,6 +97,11 @@ export function OnboardingWizard({
 
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Answers>(EMPTY_ANSWERS);
+  const hasSatTheExam =
+    answers.satAttempts !== "" && answers.satAttempts !== "0";
+  const baselineScore = hasSatTheExam
+    ? answers.lastSatMathScore
+    : answers.currentScoreEstimate;
 
   /**
    * Errors stay hidden until they press Next. Showing "pick a score" on a step
@@ -111,7 +117,12 @@ export function OnboardingWizard({
   // Each step schema picks only its own fields, so the whole answers object
   // can be handed to any of them.
   const parsed =
-    step < REVIEW_STEP ? STEP_SCHEMAS[step].safeParse(answers) : null;
+    step < REVIEW_STEP
+      ? (step === 1 && hasSatTheExam
+          ? RECENT_SCORE_STEP_SCHEMA
+          : STEP_SCHEMAS[step]
+        ).safeParse(answers)
+      : null;
 
   const errors: Record<string, string> = {};
   if (parsed && !parsed.success) {
@@ -153,9 +164,6 @@ export function OnboardingWizard({
     });
   };
 
-  const hasSatTheExam =
-    answers.satAttempts !== "" && answers.satAttempts !== "0";
-
   return (
     <form action={formAction} noValidate className="flex flex-col gap-6">
       {/* The whole answer set travels with the submit, whichever step is on
@@ -169,7 +177,11 @@ export function OnboardingWizard({
       <input
         type="hidden"
         name="currentScoreEstimate"
-        value={answers.currentScoreEstimate}
+        value={
+          hasSatTheExam
+            ? answers.lastSatMathScore
+            : answers.currentScoreEstimate
+        }
       />
       <input type="hidden" name="targetScore" value={answers.targetScore} />
       <input type="hidden" name="testDate" value={answers.testDate} />
@@ -204,11 +216,19 @@ export function OnboardingWizard({
                   setAnswers((current) => ({
                     ...current,
                     satAttempts: String(option.value),
-                    // Switching back to "not yet" clears the score, or the
-                    // pairing rule rejects a submission over a field they can
-                    // no longer see.
+                    // Crossing between the never-taken and taken branches
+                    // clears both baselines. Moving between "once" and "two
+                    // or more" preserves the same most-recent score.
                     lastSatMathScore:
-                      option.value === 0 ? "" : current.lastSatMathScore,
+                      current.satAttempts !== "" &&
+                      (current.satAttempts === "0") !== (option.value === 0)
+                        ? ""
+                        : current.lastSatMathScore,
+                    currentScoreEstimate:
+                      current.satAttempts !== "" &&
+                      (current.satAttempts === "0") !== (option.value === 0)
+                        ? ""
+                        : current.currentScoreEstimate,
                   }));
                 }}
                 disabled={pending}
@@ -218,36 +238,58 @@ export function OnboardingWizard({
             ))}
           </div>
 
-          {hasSatTheExam && (
-            <div className="mt-4">
-              <SelectField
-                label="Your most recent Math section score"
-                name="lastSatMathScoreVisible"
-                value={answers.lastSatMathScore}
-                onChange={(value) => set("lastSatMathScore", value)}
-                options={EXACT_SCORE_OPTIONS}
-                placeholder="Pick a score"
-                error={errorFor("lastSatMathScore")}
-                disabled={pending}
-              />
-            </div>
+          {errorFor("satAttempts") && (
+            <p className="mt-2 text-sm text-miss-ink">
+              {errorFor("satAttempts")}
+            </p>
           )}
+
         </Step>
       )}
 
       {step === 1 && (
         <Step
-          title="Roughly where is your math now?"
-          subtitle="A practice test score, or your best guess. Being wrong is fine — this is a starting line, not a grade."
+          title={
+            hasSatTheExam
+              ? "What was your most recent SAT Math score?"
+              : "Roughly where is your math now?"
+          }
+          subtitle={
+            hasSatTheExam
+              ? "Use the Math section score from your latest SAT."
+              : "A practice test score, or your best guess. Being wrong is fine — this is a starting line, not a grade."
+          }
         >
-          <SelectField
-            label="Current Math score"
-            name="currentScoreEstimateVisible"
-            value={answers.currentScoreEstimate}
-            onChange={(value) => set("currentScoreEstimate", value)}
-            options={BUCKET_OPTIONS}
-            placeholder="Pick a score"
-            error={errorFor("currentScoreEstimate")}
+          <SatScoreInput
+            label={
+              hasSatTheExam
+                ? "Most recent SAT Math score"
+                : "Estimated SAT Math score"
+            }
+            name={
+              hasSatTheExam
+                ? "lastSatMathScoreVisible"
+                : "currentScoreEstimateVisible"
+            }
+            value={
+              hasSatTheExam
+                ? answers.lastSatMathScore
+                : answers.currentScoreEstimate
+            }
+            onChange={(value) =>
+              set(
+                hasSatTheExam
+                  ? "lastSatMathScore"
+                  : "currentScoreEstimate",
+                value,
+              )
+            }
+            onBlur={() => setShowErrors(true)}
+            error={errorFor(
+              hasSatTheExam
+                ? "lastSatMathScore"
+                : "currentScoreEstimate",
+            )}
             disabled={pending}
           />
         </Step>
@@ -271,11 +313,10 @@ export function OnboardingWizard({
           {/* A note, not a block. Someone rebuilding after a bad test is
               allowed to aim below where they think they are. */}
           {answers.targetScore !== "" &&
-            answers.currentScoreEstimate !== "" &&
-            Number(answers.targetScore) <
-              Number(answers.currentScoreEstimate) && (
+            baselineScore !== "" &&
+            Number(answers.targetScore) < Number(baselineScore) && (
               <p className="mt-3 rounded-xl border border-insight-hairline bg-insight-surface px-4 py-3 text-sm text-insight-dark">
-                That&apos;s below your current estimate — fine if it&apos;s
+                That&apos;s below your current baseline — fine if it&apos;s
                 deliberate. Your target stays editable in Settings.
               </p>
             )}
@@ -284,30 +325,17 @@ export function OnboardingWizard({
 
       {step === 3 && (
         <Step
-          title="When are you taking it?"
-          subtitle="So practice can be paced against it. Skip this if nothing is booked."
+          title="When are you taking the SAT?"
+          subtitle="Choose an official SAT Weekend date, or tell us you're not sure yet."
         >
-          <AuthField
-            label="Test date"
+          <OfficialSatDateField
+            label="SAT Weekend date"
             name="testDateVisible"
-            type="date"
-            autoComplete="off"
-            required={false}
             value={answers.testDate}
             onChange={(value) => set("testDate", value)}
-            onBlur={() => {}}
             error={errorFor("testDate")}
             disabled={pending}
           />
-          <div className="mt-3">
-            <ChoiceCard
-              selected={answers.testDate === ""}
-              onSelect={() => set("testDate", "")}
-              disabled={pending}
-            >
-              Not sure yet
-            </ChoiceCard>
-          </div>
         </Step>
       )}
 
@@ -366,6 +394,7 @@ export function OnboardingWizard({
 
         {step < REVIEW_STEP ? (
           <button
+            key="next"
             type="button"
             onClick={goNext}
             disabled={pending}
@@ -375,6 +404,7 @@ export function OnboardingWizard({
           </button>
         ) : (
           <button
+            key="submit"
             type="submit"
             disabled={pending}
             className={ctaClassName("primary")}
@@ -444,17 +474,22 @@ function Review({ answers, domains }: { answers: Answers; domains: Domain[] }) {
   const picked = domains.filter((domain) =>
     answers.focusDomainIds.includes(domain.id),
   );
+  const hasTakenSat = answers.satAttempts !== "0";
 
   const rows: Array<[string, string]> = [
     ["Taken the SAT", attempts?.label ?? "—"],
+    hasTakenSat
+      ? ["Most recent Math score", answers.lastSatMathScore]
+      : ["Estimated Math score", answers.currentScoreEstimate],
   ];
-  if (answers.satAttempts !== "0" && answers.lastSatMathScore) {
-    rows.push(["Last Math score", answers.lastSatMathScore]);
-  }
   rows.push(
-    ["Where you are now", answers.currentScoreEstimate],
     ["Where you're headed", answers.targetScore],
-    ["Test date", answers.testDate || "Not sure yet"],
+    [
+      "Test date",
+      answers.testDate
+        ? formatOfficialSatDate(answers.testDate)
+        : "Not sure yet",
+    ],
     [
       "Topics to focus on",
       picked.length > 0 ? picked.map((d) => d.name).join(", ") : "None picked",

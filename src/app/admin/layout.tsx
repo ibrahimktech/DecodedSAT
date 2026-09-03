@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AdminNav } from "@/components/admin/AdminNav";
+import { getQuestionReportCounts } from "@/lib/admin/data";
 import { requireAdmin } from "@/lib/auth/admin";
 
 /**
@@ -37,11 +38,12 @@ export const metadata: Metadata = {
 export default async function AdminLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  await requireAdmin();
+  const { supabase } = await requireAdmin();
+  const { openReports } = await getQuestionReportCounts(supabase);
 
   return (
     <div className="flex min-h-screen">
-      <AdminNav />
+      <AdminNav openReportCount={openReports} />
       <main className="min-w-0 flex-1 px-4 py-8 sm:px-8 lg:px-10">
         {children}
       </main>

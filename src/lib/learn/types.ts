@@ -99,6 +99,27 @@ export type PracticeSubmitFailure = {
   message: string;
 };
 
+// --- Question reports -------------------------------------------------------
+
+export const QUESTION_REPORT_REASONS = [
+  "incorrect",
+  "unclear_or_broken",
+] as const;
+
+export type QuestionReportReason = (typeof QUESTION_REPORT_REASONS)[number];
+
+export const QUESTION_REPORT_REASON_LABELS: Record<
+  QuestionReportReason,
+  string
+> = {
+  incorrect: "Question or answer is incorrect",
+  unclear_or_broken: "Question is unclear or broken",
+};
+
+export type QuestionReportResult =
+  | { status: "ok" }
+  | { status: "error" | "rate_limited"; message: string };
+
 // --- Practice test action results --------------------------------------------
 
 /** Generic outcome for the per-attempt control actions. */

@@ -14,6 +14,15 @@ import type { Difficulty } from "./types";
 
 const choiceField = z.number().int().min(0).max(3);
 
+export const ReportQuestionSchema = z.object({
+  requestId: z.uuid(),
+  questionId: z.uuid(),
+  reason: z.enum(["incorrect", "unclear_or_broken"]),
+  // Empty is allowed because the quick reason is the required signal. The
+  // action trims and stores an empty/whitespace-only value as null.
+  details: z.string().max(1000),
+});
+
 export const SubmitQuestionSchema = z.object({
   questionId: z.uuid(),
   choice: choiceField,
