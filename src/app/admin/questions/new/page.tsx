@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ManualQuestionForm } from "@/components/admin/ManualQuestionForm";
-import { listQuestionSets } from "@/lib/admin/data";
+import { listAdminVideoOptions, listQuestionSets } from "@/lib/admin/data";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getDomains, getSubtopics } from "@/lib/learn/data";
 
@@ -11,10 +11,11 @@ export const metadata: Metadata = {
 
 export default async function AddQuestionPage() {
   const { supabase } = await requireAdmin();
-  const [domains, subtopics, questionSets] = await Promise.all([
+  const [domains, subtopics, questionSets, videos] = await Promise.all([
     getDomains(supabase),
     getSubtopics(supabase),
     listQuestionSets(supabase),
+    listAdminVideoOptions(supabase),
   ]);
 
   return (
@@ -41,6 +42,7 @@ export default async function AddQuestionPage() {
         domains={domains}
         subtopics={subtopics}
         questionSets={questionSets}
+        videos={videos}
       />
     </div>
   );

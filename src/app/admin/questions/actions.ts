@@ -281,6 +281,29 @@ export async function createQuestionAction(
       }
     }
 
+    if (parsed.data.solutionVideoId) {
+      const { data: video, error: videoError } = await context.supabase
+        .from("videos")
+        .select("id")
+        .eq("id", parsed.data.solutionVideoId)
+        .maybeSingle();
+      if (videoError) {
+        console.error(
+          `[admin] create question video lookup failed: ${videoError.message}`,
+        );
+        return { status: "error", message: GENERIC_ERROR_MESSAGE };
+      }
+      if (!video) {
+        return {
+          status: "error",
+          message: "Check the highlighted fields and try again.",
+          fieldErrors: {
+            solutionVideoId: "Choose an existing video or leave this empty.",
+          },
+        };
+      }
+    }
+
     const { data, error } = await context.supabase.rpc(
       "admin_create_question",
       {
@@ -293,6 +316,7 @@ export async function createQuestionAction(
         p_is_active: parsed.data.isActive,
         p_question_set_id: questionSetId,
         p_external_id: externalId || null,
+        p_solution_video_id: parsed.data.solutionVideoId ?? null,
       },
     );
 
@@ -321,6 +345,15 @@ export async function createQuestionAction(
           status: "error",
           message: "Check the highlighted fields and try again.",
           fieldErrors: { questionSetId: "Choose an existing question set." },
+        };
+      }
+      if (error.message.includes("unknown_solution_video")) {
+        return {
+          status: "error",
+          message: "Check the highlighted fields and try again.",
+          fieldErrors: {
+            solutionVideoId: "Choose an existing video or leave this empty.",
+          },
         };
       }
       console.error(
@@ -380,6 +413,26 @@ export async function updateQuestionAction(
       return { status: "error", message: "Check the fields and try again." };
     }
 
+    if (parsed.data.solutionVideoId) {
+      const { data: video, error: videoError } = await context.supabase
+        .from("videos")
+        .select("id")
+        .eq("id", parsed.data.solutionVideoId)
+        .maybeSingle();
+      if (videoError) {
+        console.error(
+          `[admin] update question video lookup failed: ${videoError.message}`,
+        );
+        return { status: "error", message: GENERIC_ERROR_MESSAGE };
+      }
+      if (!video) {
+        return {
+          status: "error",
+          message: "The selected solution video no longer exists. Remove it or choose another.",
+        };
+      }
+    }
+
     // The admin's own session; RLS's update policy re-checks is_admin() and
     // the answer key columns are writable only through this grant.
     const { error, count } = await context.supabase
@@ -392,6 +445,9 @@ export async function updateQuestionAction(
           correct_choice: parsed.data.correctChoice,
           explanation,
           difficulty: parsed.data.difficulty,
+          ...(parsed.data.solutionVideoId !== undefined
+            ? { solution_video_id: parsed.data.solutionVideoId }
+            : {}),
         },
         { count: "exact" },
       )

@@ -24,6 +24,13 @@ export type AdminQuestion = {
   domainId: string;
   domainName: string;
   setName: string | null;
+  solutionVideo: AdminQuestionSolutionVideo | null;
+};
+
+export type AdminQuestionSolutionVideo = {
+  id: string;
+  title: string;
+  isActive: boolean;
 };
 
 export const QUESTION_REPORT_STATUSES = [
@@ -93,6 +100,12 @@ export type AdminVideo = {
   subtopicName: string | null;
   domainId: string | null;
   categoryId: string | null;
+  categoryName: string | null;
+};
+
+/** Lightweight video row used by the searchable question-video picker. */
+export type AdminVideoOption = AdminQuestionSolutionVideo & {
+  subtopicName: string | null;
   categoryName: string | null;
 };
 

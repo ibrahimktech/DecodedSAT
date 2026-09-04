@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { MathText } from "@/components/app/MathText";
+import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
 import { CtaButton } from "@/components/CtaButton";
 import { requireUser } from "@/lib/auth/require-user";
 import { getPracticeTestReview } from "@/lib/learn/tests";
@@ -192,26 +193,36 @@ export default async function PracticeTestReviewPage({
                       })}
                     </ul>
 
+                    {item.solutionVideo ? (
+                      <SolutionVideoLink
+                        video={item.solutionVideo}
+                        questionId={item.id}
+                        answerResult={item.isCorrect ? "correct" : "incorrect"}
+                        emphasis={item.isCorrect ? "secondary" : "primary"}
+                      />
+                    ) : (
+                      !item.isCorrect &&
+                      item.subtopicHasVideo && (
+                        <p className="mt-3 rounded-lg bg-insight-chip px-3 py-2.5 text-[0.9375rem] text-insight-dark">
+                          <Link
+                            href={`/videos?subtopic=${item.subtopicSlug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                          >
+                            Review this topic
+                          </Link>{" "}
+                          with a {item.subtopicName} explainer.
+                        </p>
+                      )
+                    )}
+
                     {item.explanation && (
                       <MathText
                         as="p"
                         text={item.explanation}
                         className="mt-4 rounded-xl bg-background px-4 py-3 font-question text-base leading-7 whitespace-pre-line text-ink"
                       />
-                    )}
-
-                    {/* The decode loop: a miss points at the explainer for the
-                        exact gap, not at more practice. */}
-                    {!item.isCorrect && item.subtopicHasVideo && (
-                      <p className="mt-3 rounded-lg bg-insight-chip px-3 py-2.5 text-[0.9375rem] text-insight-dark">
-                        This gap has an explainer:{" "}
-                        <Link
-                          href={`/videos?subtopic=${item.subtopicSlug}`}
-                          className="font-semibold underline"
-                        >
-                          watch the {item.subtopicName} video
-                        </Link>
-                      </p>
                     )}
                   </li>
                 );

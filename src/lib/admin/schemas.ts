@@ -98,6 +98,9 @@ export const QuestionFieldsSchema = z.object({
     .min(1, "Enter the answer explanation.")
     .max(4000, "Use 4,000 characters or fewer."),
   difficulty: DifficultyEnum,
+  // Optional keeps cached pre-deploy editors from overwriting an existing
+  // link. An explicit null is the deliberate "Remove" action.
+  solutionVideoId: z.uuid().nullable().optional(),
 });
 
 export const EditQuestionSchema = QuestionFieldsSchema.extend({

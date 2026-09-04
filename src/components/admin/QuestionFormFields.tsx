@@ -2,6 +2,8 @@
 
 import type { ReactNode } from "react";
 import { MathText } from "@/components/app/MathText";
+import { SolutionVideoSelector } from "@/components/admin/SolutionVideoSelector";
+import type { AdminVideoOption } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
 import {
   CHOICE_LETTERS,
@@ -18,6 +20,7 @@ export type QuestionDraft = {
   difficulty: Difficulty;
   domainId: string;
   subtopicId: string;
+  solutionVideoId: string | null;
 };
 
 export type QuestionFieldErrors = Record<string, string>;
@@ -98,6 +101,7 @@ export function QuestionFormFields({
   onChange,
   domains,
   subtopics,
+  videos,
   errors = {},
   compact = false,
 }: {
@@ -106,6 +110,7 @@ export function QuestionFormFields({
   onChange: (value: QuestionDraft) => void;
   domains: Domain[];
   subtopics: Subtopic[];
+  videos: AdminVideoOption[];
   errors?: QuestionFieldErrors;
   compact?: boolean;
 }) {
@@ -312,6 +317,22 @@ export function QuestionFormFields({
             </select>
           </label>
         </div>
+      </FormSection>
+
+      <FormSection
+        title="Solution video"
+        description="Optionally connect this question to its exact video walkthrough."
+        compact={compact}
+      >
+        <SolutionVideoSelector
+          idPrefix={idPrefix}
+          videos={videos}
+          selectedId={value.solutionVideoId}
+          error={errors.solutionVideoId}
+          onChange={(solutionVideoId) =>
+            update("solutionVideoId", solutionVideoId)
+          }
+        />
       </FormSection>
 
       <FormSection

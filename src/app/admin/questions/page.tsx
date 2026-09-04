@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { QuestionAdminList } from "@/components/admin/QuestionAdminList";
 import { UploadQuestionsPanel } from "@/components/admin/UploadQuestionsPanel";
-import { listAdminQuestions, listQuestionSets } from "@/lib/admin/data";
+import {
+  listAdminQuestions,
+  listAdminVideoOptions,
+  listQuestionSets,
+} from "@/lib/admin/data";
 import { AdminQuestionFiltersSchema } from "@/lib/admin/schemas";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getDomains, getSubtopics } from "@/lib/learn/data";
@@ -46,11 +50,12 @@ export default async function AdminQuestionsPage({
   const returnTo = safeReportReturnPath(single("returnTo"));
   const wasCreated = single("created") === "1" && Boolean(filters.id);
 
-  const [domains, subtopics, sets, questions] = await Promise.all([
+  const [domains, subtopics, sets, questions, videos] = await Promise.all([
     getDomains(supabase),
     getSubtopics(supabase),
     listQuestionSets(supabase),
     listAdminQuestions(supabase, filters),
+    listAdminVideoOptions(supabase),
   ]);
 
   const status = filters.status ?? "active";
@@ -195,6 +200,7 @@ export default async function AdminQuestionsPage({
           questions={questions}
           domains={domains}
           subtopics={subtopics}
+          videos={videos}
           initialEditingId={initialEditingId}
           returnTo={returnTo}
         />

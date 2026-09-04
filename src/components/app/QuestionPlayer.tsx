@@ -8,8 +8,8 @@
  * correctness, the right answer and the explanation only ever exist client-
  * side after an attempt is already recorded server-side.
  *
- * A miss shows the explanation plus a link to the subtopic's explainer video
- * when one exists — the decode loop this product is named after.
+ * Feedback leads with an exact solution video when one is linked. A miss can
+ * otherwise fall back to the broader subtopic library.
  *
  * ## Why it wears the test chrome
  *
@@ -87,6 +87,7 @@ import {
 import { MathText } from "@/components/app/MathText";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { Skeleton } from "@/components/app/Skeleton";
+import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
 import { ChoiceList } from "@/components/app/exam/ChoiceList";
 import { ExamShell, examButtonClassName } from "@/components/app/exam/ExamShell";
 import { ExamTimer } from "@/components/app/exam/ExamTimer";
@@ -898,6 +899,67 @@ export function QuestionPlayer({
         />
       </div>
 
+      {failure && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-miss-hairline bg-miss-surface px-4 py-3 text-[0.9375rem] text-miss-ink"
+        >
+          {failure}
+        </p>
+      )}
+
+      {record && (
+        <div className="mt-2">
+          {record.verdict.solutionVideo ? (
+            <SolutionVideoLink
+              video={record.verdict.solutionVideo}
+              questionId={question.id}
+              answerResult={record.verdict.isCorrect ? "correct" : "incorrect"}
+              emphasis={record.verdict.isCorrect ? "secondary" : "primary"}
+            />
+          ) : (
+            !record.verdict.isCorrect &&
+            question.subtopicHasVideo && (
+              <p className="mt-3 rounded-lg bg-insight-chip px-3 py-2.5 text-[0.9375rem] text-insight-dark">
+                <Link
+                  href={`/videos?subtopic=${question.subtopicSlug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  Review this topic
+                </Link>{" "}
+                with a {question.subtopicName} explainer.
+              </p>
+            )
+          )}
+
+          <div
+            role="status"
+            className={`mt-3 rounded-xl border p-4 ${
+              record.verdict.isCorrect
+                ? "border-accent bg-accent-chip"
+                : "border-miss-hairline bg-miss-surface"
+            }`}
+          >
+            <p
+              className={`font-display text-lg font-bold ${
+                record.verdict.isCorrect ? "text-accent" : "text-miss-ink"
+              }`}
+            >
+              {record.verdict.isCorrect
+                ? "Correct!"
+                : `Not quite — the answer is ${CHOICE_LETTERS[record.verdict.correctChoice]}.`}
+            </p>
+            <MathText
+              as="p"
+              text={record.verdict.explanation}
+              className="mt-1.5 font-question text-base leading-7 whitespace-pre-line text-ink"
+            />
+          </div>
+        </div>
+      )}
+
       <div className="mt-4 flex justify-end">
         <ReportQuestionButton
           question={question}
@@ -912,53 +974,6 @@ export function QuestionPlayer({
           }}
         />
       </div>
-
-      {failure && (
-        <p
-          role="alert"
-          className="mt-4 rounded-xl border border-miss-hairline bg-miss-surface px-4 py-3 text-[0.9375rem] text-miss-ink"
-        >
-          {failure}
-        </p>
-      )}
-
-      {record && (
-        <div
-          role="status"
-          className={`mt-5 rounded-xl border p-4 ${
-            record.verdict.isCorrect
-              ? "border-accent bg-accent-chip"
-              : "border-miss-hairline bg-miss-surface"
-          }`}
-        >
-          <p
-            className={`font-display text-lg font-bold ${
-              record.verdict.isCorrect ? "text-accent" : "text-miss-ink"
-            }`}
-          >
-            {record.verdict.isCorrect
-              ? "Correct!"
-              : `Not quite — the answer is ${CHOICE_LETTERS[record.verdict.correctChoice]}.`}
-          </p>
-          <MathText
-            as="p"
-            text={record.verdict.explanation}
-            className="mt-1.5 font-question text-base leading-7 whitespace-pre-line text-ink"
-          />
-
-          {!record.verdict.isCorrect && question.subtopicHasVideo && (
-            <p className="mt-3 rounded-lg bg-insight-chip px-3 py-2.5 text-[0.9375rem] text-insight-dark">
-              This gap has an explainer:{" "}
-              <Link
-                href={`/videos?subtopic=${question.subtopicSlug}`}
-                className="font-semibold underline"
-              >
-                watch the {question.subtopicName} video
-              </Link>
-            </p>
-          )}
-        </div>
-      )}
 
       {/* Available from anywhere in the set. With free navigation and a set
           that can run to thousands, the last question is not where a sitting

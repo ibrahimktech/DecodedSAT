@@ -16,7 +16,7 @@ export const metadata: Metadata = {
  *
  * The player iframe loads here and only here — via the privacy-enhanced
  * `youtube-nocookie.com` host, the sole embed origin the CSP allows. The
- * card click that led here is the play gesture, so the embed autoplays.
+ * Playback starts only when the student chooses it in the YouTube player.
  *
  * The route param is untrusted URL input: anything that is not a UUID is a
  * 404 before it ever reaches a query, and RLS scopes the query itself.
@@ -64,9 +64,9 @@ export default async function WatchVideoPage({
 
       <div className="mt-4 aspect-video w-full overflow-hidden rounded-2xl border border-hairline bg-ink">
         <iframe
-          src={`https://www.youtube-nocookie.com/embed/${safeId}?autoplay=1&rel=0`}
+          src={`https://www.youtube-nocookie.com/embed/${safeId}?rel=0`}
           title={video.title}
-          allow="autoplay; encrypted-media; picture-in-picture"
+          allow="encrypted-media; picture-in-picture"
           allowFullScreen
           className="h-full w-full"
         />

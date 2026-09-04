@@ -161,6 +161,8 @@ export async function submitQuestionAttemptAction(
       is_correct: boolean;
       correct_choice: number;
       explanation: string;
+      solution_video_id: string | null;
+      solution_video_title: string | null;
     }> | null)?.[0];
     if (!verdict) return failed;
 
@@ -169,6 +171,14 @@ export async function submitQuestionAttemptAction(
       isCorrect: verdict.is_correct,
       correctChoice: verdict.correct_choice,
       explanation: verdict.explanation,
+      solutionVideo:
+        typeof verdict.solution_video_id === "string" &&
+        typeof verdict.solution_video_title === "string"
+          ? {
+              id: verdict.solution_video_id,
+              title: verdict.solution_video_title,
+            }
+          : null,
     };
   } catch (error) {
     console.error(`[learn] submit_question_attempt threw: ${describeError(error)}`);

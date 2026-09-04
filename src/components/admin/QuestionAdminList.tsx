@@ -21,7 +21,7 @@ import {
   type QuestionDraft,
 } from "@/components/admin/QuestionFormFields";
 import { MathText } from "@/components/app/MathText";
-import type { AdminQuestion } from "@/lib/admin/types";
+import type { AdminQuestion, AdminVideoOption } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
 import {
   DIFFICULTY_LABELS,
@@ -31,6 +31,7 @@ type Props = {
   questions: AdminQuestion[];
   domains: Domain[];
   subtopics: Subtopic[];
+  videos: AdminVideoOption[];
   initialEditingId?: string;
   returnTo?: string;
 };
@@ -39,6 +40,7 @@ export function QuestionAdminList({
   questions,
   domains,
   subtopics,
+  videos,
   initialEditingId,
   returnTo,
 }: Props) {
@@ -59,6 +61,7 @@ export function QuestionAdminList({
           question={question}
           domains={domains}
           subtopics={subtopics}
+          videos={videos}
           initiallyEditing={question.id === initialEditingId}
           returnTo={returnTo}
         />
@@ -71,12 +74,14 @@ function QuestionRow({
   question,
   domains,
   subtopics,
+  videos,
   initiallyEditing,
   returnTo,
 }: {
   question: AdminQuestion;
   domains: Domain[];
   subtopics: Subtopic[];
+  videos: AdminVideoOption[];
   initiallyEditing: boolean;
   returnTo?: string;
 }) {
@@ -134,6 +139,19 @@ function QuestionRow({
                 {question.externalId}
               </span>
             )}
+            {question.solutionVideo && (
+              <span
+                title={question.solutionVideo.title}
+                className={`max-w-64 truncate rounded-lg px-2 py-0.5 ${
+                  question.solutionVideo.isActive
+                    ? "bg-insight-chip text-insight-dark"
+                    : "bg-background text-muted"
+                }`}
+              >
+                Video · {question.solutionVideo.title}
+                {!question.solutionVideo.isActive && " (inactive)"}
+              </span>
+            )}
             {!question.isActive && (
               <span className="rounded-lg bg-miss-surface px-2 py-0.5 text-miss-ink">
                 Inactive
@@ -182,6 +200,7 @@ function QuestionRow({
           question={question}
           domains={domains}
           subtopics={subtopics}
+          videos={videos}
           onSaved={() => {
             setEditing(false);
             if (returnTo) {
@@ -200,11 +219,13 @@ function QuestionEditForm({
   question,
   domains,
   subtopics,
+  videos,
   onSaved,
 }: {
   question: AdminQuestion;
   domains: Domain[];
   subtopics: Subtopic[];
+  videos: AdminVideoOption[];
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState<QuestionDraft>({
@@ -215,6 +236,7 @@ function QuestionEditForm({
     difficulty: question.difficulty,
     domainId: question.domainId,
     subtopicId: question.subtopicId,
+    solutionVideoId: question.solutionVideo?.id ?? null,
   });
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -230,6 +252,7 @@ function QuestionEditForm({
         correctChoice: draft.correctChoice,
         explanation: draft.explanation,
         difficulty: draft.difficulty,
+        solutionVideoId: draft.solutionVideoId,
       });
       if (result.status === "ok") {
         onSaved();
@@ -247,6 +270,7 @@ function QuestionEditForm({
         onChange={setDraft}
         domains={domains}
         subtopics={subtopics}
+        videos={videos}
         compact
       />
 

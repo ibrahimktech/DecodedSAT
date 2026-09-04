@@ -23,6 +23,7 @@ import type {
   PlayableQuestion,
   PracticeQuestion,
   QuestionIndexEntry,
+  SolutionVideo,
   Subtopic,
 } from "./types";
 import type { QuestionSetFilters } from "./schemas";
@@ -1307,6 +1308,7 @@ export async function getSectionQuestions(
 // --- Practice results --------------------------------------------------------
 
 export type ResultItem = {
+  id: string;
   position: number;
   prompt: string;
   choices: string[];
@@ -1318,6 +1320,7 @@ export type ResultItem = {
   subtopicName: string;
   subtopicSlug: string;
   subtopicHasVideo: boolean;
+  solutionVideo: SolutionVideo | null;
 };
 
 export type PracticeResults = {
@@ -1398,7 +1401,9 @@ export async function getPracticeResults(
   const [solutionsResult, videosResult] = await Promise.all([
     supabase
       .from("attempted_question_solutions")
-      .select("question_id, correct_choice, explanation")
+      .select(
+        "question_id, correct_choice, explanation, solution_video_id, solution_video_title",
+      )
       .in("question_id", questionIds),
     supabase
       .from("videos")
@@ -1426,12 +1431,19 @@ export async function getPracticeResults(
 
   const solutions = new Map<
     string,
-    { correct_choice: number; explanation: string }
+    {
+      correct_choice: number;
+      explanation: string;
+      solution_video_id: string | null;
+      solution_video_title: string | null;
+    }
   >();
   for (const row of (solutionsResult.data ?? []) as Array<{
     question_id: string;
     correct_choice: number;
     explanation: string;
+    solution_video_id: string | null;
+    solution_video_title: string | null;
   }>) {
     solutions.set(row.question_id, row);
   }
@@ -1455,6 +1467,7 @@ export async function getPracticeResults(
       const answer = answers.get(row.questions.id);
       const solution = solutions.get(row.questions.id);
       return {
+        id: row.questions.id,
         position: row.position,
         prompt: row.questions.prompt,
         choices: toChoices(row.questions.choices),
@@ -1465,6 +1478,13 @@ export async function getPracticeResults(
         subtopicName: row.questions.subtopics.name,
         subtopicSlug: row.questions.subtopics.slug,
         subtopicHasVideo: subtopicsWithVideo.has(row.questions.subtopics.id),
+        solutionVideo:
+          solution?.solution_video_id && solution.solution_video_title
+            ? {
+                id: solution.solution_video_id,
+                title: solution.solution_video_title,
+              }
+            : null,
       };
     }),
   };

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { ctaClassName } from "@/components/CtaButton";
+import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
 import { requireUser } from "@/lib/auth/require-user";
 import { getPracticeResults } from "@/lib/learn/data";
 import { CHOICE_LETTERS, formatSeconds } from "@/lib/learn/types";
@@ -141,22 +142,35 @@ export default async function PracticeResultsPage({
                   })}
                 </ul>
 
+                {item.solutionVideo ? (
+                  <SolutionVideoLink
+                    video={item.solutionVideo}
+                    questionId={item.id}
+                    answerResult={wasCorrect ? "correct" : "incorrect"}
+                    emphasis={wasCorrect ? "secondary" : "primary"}
+                  />
+                ) : (
+                  !wasCorrect &&
+                  item.subtopicHasVideo && (
+                    <p className="mt-3 rounded-lg bg-insight-chip px-3 py-2.5 text-[0.9375rem] text-insight-dark">
+                      <Link
+                        href={`/videos?subtopic=${item.subtopicSlug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                      >
+                        Review this topic
+                      </Link>{" "}
+                      with a {item.subtopicName} explainer.
+                    </p>
+                  )
+                )}
+
                 {!wasCorrect && item.explanation && (
                   <div className="mt-3 rounded-xl border border-insight-hairline bg-insight-surface p-4">
                     <p className="font-question text-base leading-7 text-ink">
                       {item.explanation}
                     </p>
-                    {item.subtopicHasVideo && (
-                      <p className="mt-2 text-[0.9375rem] text-insight-dark">
-                        <Link
-                          href={`/videos?subtopic=${item.subtopicSlug}`}
-                          className="font-semibold underline"
-                        >
-                          Watch the {item.subtopicName} explainer
-                        </Link>{" "}
-                        to close this gap.
-                      </p>
-                    )}
                   </div>
                 )}
               </li>

@@ -25,6 +25,7 @@ import type {
   AdminUserRow,
   AdminVideo,
   AdminVideoCategory,
+  AdminVideoOption,
   QuestionSetOption,
 } from "./types";
 import type {
@@ -126,7 +127,8 @@ export async function listAdminQuestions(
     .select(
       "id, prompt, choices, correct_choice, explanation, difficulty, " +
         "is_active, external_id, subtopic_id, subtopic_name, domain_id, " +
-        "domain_name, question_set_id, set_name",
+        "domain_name, question_set_id, set_name, solution_video_id, " +
+        "solution_video_title, solution_video_is_active",
     )
     .order("domain_name")
     .order("subtopic_name")
@@ -169,6 +171,9 @@ export async function listAdminQuestions(
     domain_id: string;
     domain_name: string;
     set_name: string | null;
+    solution_video_id: string | null;
+    solution_video_title: string | null;
+    solution_video_is_active: boolean | null;
   }>)
     .map((row) => ({
       id: row.id,
@@ -184,6 +189,14 @@ export async function listAdminQuestions(
       domainId: row.domain_id,
       domainName: row.domain_name,
       setName: row.set_name,
+      solutionVideo:
+        row.solution_video_id && row.solution_video_title
+          ? {
+              id: row.solution_video_id,
+              title: row.solution_video_title,
+              isActive: row.solution_video_is_active ?? false,
+            }
+          : null,
     }))
     .filter((question) => question.choices.length === 4);
 }
@@ -326,6 +339,22 @@ export async function getAdminQuestionReport(
     return null;
   }
 
+  const { data: solutionLink, error: solutionLinkError } = await supabase
+    .from("admin_questions")
+    .select(
+      "solution_video_id, solution_video_title, solution_video_is_active",
+    )
+    .eq("id", row.question_id)
+    .maybeSingle();
+  if (solutionLinkError) {
+    logQueryError("admin_question_report_solution_video", solutionLinkError);
+  }
+  const linkedVideo = solutionLink as {
+    solution_video_id: string | null;
+    solution_video_title: string | null;
+    solution_video_is_active: boolean | null;
+  } | null;
+
   return {
     ...mapQuestionReportSummary(row),
     userId: row.user_id,
@@ -353,6 +382,14 @@ export async function getAdminQuestionReport(
       domainId: row.domain_id,
       domainName: row.domain_name,
       setName: row.set_name,
+      solutionVideo:
+        linkedVideo?.solution_video_id && linkedVideo.solution_video_title
+          ? {
+              id: linkedVideo.solution_video_id,
+              title: linkedVideo.solution_video_title,
+              isActive: linkedVideo.solution_video_is_active ?? false,
+            }
+          : null,
     },
   };
 }
@@ -407,6 +444,39 @@ export async function getQuestionReportCounts(
 }
 
 // --- Videos ----------------------------------------------------------------------
+
+/**
+ * Minimal rows for the question editor's searchable picker. Inactive videos
+ * remain present so an existing soft-deleted link is visible and removable;
+ * the picker marks them and prevents choosing them as a new link.
+ */
+export async function listAdminVideoOptions(
+  supabase: SupabaseClient,
+): Promise<AdminVideoOption[]> {
+  const { data, error } = await supabase
+    .from("videos")
+    .select("id, title, is_active, subtopics(name), video_categories(name)")
+    .order("title");
+
+  if (error) {
+    logQueryError("admin_video_options", error);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    title: string;
+    is_active: boolean;
+    subtopics: { name: string } | null;
+    video_categories: { name: string } | null;
+  }>).map((row) => ({
+    id: row.id,
+    title: row.title,
+    isActive: row.is_active,
+    subtopicName: row.subtopics?.name ?? null,
+    categoryName: row.video_categories?.name ?? null,
+  }));
+}
 
 /**
  * Both embeds are LEFT joins so a category video is not dropped from the

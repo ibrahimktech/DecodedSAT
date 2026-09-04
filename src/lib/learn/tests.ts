@@ -23,7 +23,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describeError } from "@/lib/auth/describe-error";
-import type { Difficulty, PracticeQuestion } from "./types";
+import type { Difficulty, PracticeQuestion, SolutionVideo } from "./types";
 
 function logQueryError(label: string, error: unknown): void {
   console.error(`[tests] ${label} failed: ${describeError(error)}`);
@@ -405,6 +405,7 @@ export async function getRunnerState(
 }
 
 export type TestReviewItem = {
+  id: string;
   moduleNumber: number;
   position: number;
   prompt: string;
@@ -416,6 +417,7 @@ export type TestReviewItem = {
   subtopicName: string;
   subtopicSlug: string;
   subtopicHasVideo: boolean;
+  solutionVideo: SolutionVideo | null;
 };
 
 export type TestReview = {
@@ -514,7 +516,9 @@ export async function getPracticeTestReview(
   const [solutionsResult, videosResult] = await Promise.all([
     supabase
       .from("attempted_question_solutions")
-      .select("question_id, correct_choice, explanation")
+      .select(
+        "question_id, correct_choice, explanation, solution_video_id, solution_video_title",
+      )
       .in("question_id", questionIds),
     supabase
       .from("videos")
@@ -547,12 +551,19 @@ export async function getPracticeTestReview(
 
   const solutions = new Map<
     string,
-    { correct_choice: number; explanation: string }
+    {
+      correct_choice: number;
+      explanation: string;
+      solution_video_id: string | null;
+      solution_video_title: string | null;
+    }
   >();
   for (const solution of (solutionsResult.data ?? []) as Array<{
     question_id: string;
     correct_choice: number;
     explanation: string;
+    solution_video_id: string | null;
+    solution_video_title: string | null;
   }>) {
     solutions.set(solution.question_id, solution);
   }
@@ -580,6 +591,7 @@ export async function getPracticeTestReview(
       const response = responses.get(entry.questions.id);
       const solution = solutions.get(entry.questions.id);
       return {
+        id: entry.questions.id,
         moduleNumber: entry.module_number,
         position: entry.order_index,
         prompt: entry.questions.prompt,
@@ -594,6 +606,13 @@ export async function getPracticeTestReview(
         subtopicName: entry.questions.subtopics.name,
         subtopicSlug: entry.questions.subtopics.slug,
         subtopicHasVideo: subtopicsWithVideo.has(entry.questions.subtopics.id),
+        solutionVideo:
+          solution?.solution_video_id && solution.solution_video_title
+            ? {
+                id: solution.solution_video_id,
+                title: solution.solution_video_title,
+              }
+            : null,
       };
     }),
   };

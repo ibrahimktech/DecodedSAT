@@ -10,7 +10,7 @@ import {
   type QuestionFieldErrors,
 } from "@/components/admin/QuestionFormFields";
 import { CreateQuestionSchema } from "@/lib/admin/schemas";
-import type { QuestionSetOption } from "@/lib/admin/types";
+import type { AdminVideoOption, QuestionSetOption } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
 
 const FIELD_CLASS =
@@ -31,10 +31,12 @@ export function ManualQuestionForm({
   domains,
   subtopics,
   questionSets,
+  videos,
 }: {
   domains: Domain[];
   subtopics: Subtopic[];
   questionSets: QuestionSetOption[];
+  videos: AdminVideoOption[];
 }) {
   const router = useRouter();
   const firstDomain = domains[0]?.id ?? "";
@@ -47,6 +49,7 @@ export function ManualQuestionForm({
     domainId: firstDomain,
     subtopicId:
       subtopics.find((subtopic) => subtopic.domainId === firstDomain)?.id ?? "",
+    solutionVideoId: null,
   });
   const [questionSetId, setQuestionSetId] = useState("");
   const [externalId, setExternalId] = useState("");
@@ -68,6 +71,7 @@ export function ManualQuestionForm({
       correctChoice: draft.correctChoice,
       explanation: draft.explanation,
       difficulty: draft.difficulty,
+      solutionVideoId: draft.solutionVideoId,
       questionSetId,
       externalId,
       isActive,
@@ -123,6 +127,9 @@ export function ManualQuestionForm({
             if (value.correctChoice !== draft.correctChoice) {
               delete next.correctChoice;
             }
+            if (value.solutionVideoId !== draft.solutionVideoId) {
+              delete next.solutionVideoId;
+            }
             value.choices.forEach((choice, index) => {
               if (choice !== draft.choices[index]) {
                 delete next.choices;
@@ -134,6 +141,7 @@ export function ManualQuestionForm({
         }}
         domains={domains}
         subtopics={subtopics}
+        videos={videos}
         errors={errors}
       />
 

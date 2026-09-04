@@ -72,6 +72,12 @@ export type QuestionIndexEntry = {
   previousResult: "correct" | "incorrect" | null;
 };
 
+/** Minimal public metadata needed to reach an exact solution after grading. */
+export type SolutionVideo = {
+  id: string;
+  title: string;
+};
+
 /** How many questions one window request carries. */
 export const QUESTION_WINDOW_SIZE = 25;
 
@@ -82,6 +88,7 @@ export type QuestionVerdict =
       isCorrect: boolean;
       correctChoice: number;
       explanation: string;
+      solutionVideo: SolutionVideo | null;
     }
   | { status: "error"; message: string }
   | { status: "rate_limited"; message: string };
