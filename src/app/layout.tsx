@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { Baloo_2, Figtree, Noto_Serif } from "next/font/google";
+import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import { site } from "@/lib/site";
 import "./globals.css";
 
@@ -74,7 +76,11 @@ export default function RootLayout({
       lang="en"
       className={`${figtree.variable} ${baloo.variable} ${notoSerif.variable}`}
     >
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <Suspense fallback={children}>
+          <AnalyticsProvider>{children}</AnalyticsProvider>
+        </Suspense>
+      </body>
     </html>
   );
 }

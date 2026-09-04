@@ -35,13 +35,17 @@ type ExitButtonProps = {
     body: string;
     confirmLabel: string;
   };
+  onLeave?: () => void;
 };
 
-export function ExitButton({ href, label, confirm }: ExitButtonProps) {
+export function ExitButton({ href, label, confirm, onLeave }: ExitButtonProps) {
   const router = useRouter();
   const [asking, setAsking] = useState(false);
 
-  const leave = () => router.push(href);
+  const leave = () => {
+    onLeave?.();
+    router.push(href);
+  };
 
   return (
     <>

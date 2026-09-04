@@ -53,10 +53,18 @@ export const AUTH_CALLBACK_URL = `${SITE_URL}/auth/callback`;
 /**
  * The anon key is designed to ship to the browser: it carries no privileges of
  * its own, and Row Level Security — not the key — is the access boundary. The
- * `service_role` key is the opposite and appears nowhere in this codebase.
+ * `service_role` key is the opposite: it is read only by the server-only admin
+ * client used for self-service account deletion and is never exported here.
  */
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+/** Browser-safe PostHog project settings. The token identifies a project; it is not a secret. */
+export const POSTHOG_PROJECT_TOKEN =
+  process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN || "";
+export const POSTHOG_HOST = trimTrailingSlash(
+  process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
+);
 
 
 /** False until real project keys are in `.env.local`. */

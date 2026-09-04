@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { signOutAction } from "@/app/auth/actions";
 import { PasswordForm } from "@/components/app/PasswordForm";
+import { DeleteAccountPanel } from "@/components/app/DeleteAccountPanel";
 import { StudyPlanForm } from "@/components/app/StudyPlanForm";
 import { ctaClassName } from "@/components/CtaButton";
 import { requireUser } from "@/lib/auth/require-user";
@@ -132,6 +133,8 @@ export default async function SettingsPage() {
           Sign out
         </button>
       </form>
+
+      <DeleteAccountPanel />
     </div>
   );
 }

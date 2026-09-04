@@ -22,7 +22,8 @@
  * remain six questions long, so progress never jumps or lies.
  */
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { completeOnboardingAction } from "@/app/onboarding/actions";
 import { ctaClassName } from "@/components/CtaButton";
 import { FormMessage } from "@/components/auth/FormMessage";
@@ -42,6 +43,7 @@ import {
   STEP_SCHEMAS,
 } from "@/lib/onboarding/schemas";
 import { formatOfficialSatDate } from "@/lib/onboarding/sat-dates";
+import { trackProductEvent, trackStudentEvent } from "@/lib/analytics/client";
 
 /**
  * Everything is a string, because that is what an input holds and what
@@ -90,6 +92,7 @@ export function OnboardingWizard({
   firstName: string | null;
   domains: Domain[];
 }) {
+  const router = useRouter();
   const [state, formAction, pending] = useActionState(
     completeOnboardingAction,
     initialAuthFormState,
@@ -108,6 +111,26 @@ export function OnboardingWizard({
    * someone has not answered yet reads as a scolding, not as help.
    */
   const [showErrors, setShowErrors] = useState(false);
+
+  useEffect(() => {
+    trackStudentEvent("onboarding_started");
+  }, []);
+
+  useEffect(() => {
+    trackProductEvent("onboarding_step_viewed", {
+      step: Math.min(step + 1, STEP_COUNT),
+      is_review: step === REVIEW_STEP,
+      path: hasSatTheExam ? "taken_sat" : "not_taken_sat",
+    });
+  }, [hasSatTheExam, step]);
+
+  useEffect(() => {
+    if (state.status !== "sent") return;
+    if (state.message === "completed_now") {
+      trackStudentEvent("onboarding_completed");
+    }
+    router.replace("/dashboard");
+  }, [router, state.message, state.status]);
 
   const set = <K extends keyof Answers>(key: K, value: Answers[K]) => {
     setAnswers((current) => ({ ...current, [key]: value }));
@@ -193,7 +216,7 @@ export function OnboardingWizard({
 
       <ProgressBar step={step} />
 
-      {state.status !== "idle" && state.message && (
+      {state.status !== "idle" && state.status !== "sent" && state.message && (
         <FormMessage>{state.message}</FormMessage>
       )}
 

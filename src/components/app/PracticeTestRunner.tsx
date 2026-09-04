@@ -65,12 +65,15 @@ import {
 } from "@/components/app/exam/QuestionNavigator";
 import { ReferenceSheet } from "@/components/app/exam/ReferenceSheet";
 import { ctaClassName } from "@/components/CtaButton";
+import { trackStudentEvent } from "@/lib/analytics/client";
+import { ANALYTICS_THRESHOLDS } from "@/lib/analytics/constants";
 import { useExamFlags } from "@/lib/learn/exam-flags";
 import type { RunnerState } from "@/lib/learn/tests";
 import { formatSeconds, MODULE_SECONDS } from "@/lib/learn/types";
 
 /** How long to sit on a selection before writing it. */
 const AUTOSAVE_DELAY_MS = 400;
+const analyticsTimestamp = () => Date.now();
 
 type SaveState = "saving" | "saved" | "failed";
 
@@ -100,11 +103,74 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
   const saveTimers = useRef(new Map<string, number>());
   /** Ends the module exactly once, however many ways it gets triggered. */
   const endingRef = useRef(false);
+  const trackedAnswersRef = useRef(new Set<string>());
+  const firstViewedAtRef = useRef(new Map<string, number>());
+  const desmosUsedIdsRef = useRef(new Set<string>());
+  const currentViewedAtRef = useRef<number | null>(null);
+  const currentExitTrackedRef = useRef(false);
 
   const question = state.questions[index];
   const answeredCount = state.questions.filter(
     (item) => answers[item.id] !== undefined,
   ).length;
+
+  const recordCurrentExit = useCallback(() => {
+    if (
+      state.phase !== "module" ||
+      !question ||
+      answers[question.id] !== undefined ||
+      currentExitTrackedRef.current
+    ) return;
+    currentExitTrackedRef.current = true;
+    const answerTimeMs = Math.min(
+      Math.max(0, analyticsTimestamp() - (currentViewedAtRef.current ?? analyticsTimestamp())),
+      7_200_000,
+    );
+    const eventName =
+      answerTimeMs >= ANALYTICS_THRESHOLDS.giveUpMinimumSeconds * 1_000
+        ? "question_gave_up"
+        : answerTimeMs >= ANALYTICS_THRESHOLDS.skipMinimumSeconds * 1_000
+          ? "question_skipped"
+          : null;
+    if (eventName) {
+      trackStudentEvent(eventName, {
+        question_id: question.id,
+        practice_session_id: state.attemptId,
+        answer_time_ms: answerTimeMs,
+        source: "practice_test",
+      });
+    }
+  }, [answers, question, state.attemptId, state.phase]);
+
+  const goToQuestion = useCallback(
+    (nextIndex: number) => {
+      if (nextIndex !== index) recordCurrentExit();
+      setIndex(nextIndex);
+    },
+    [index, recordCurrentExit],
+  );
+
+  useEffect(() => {
+    if (state.phase !== "module") return;
+    trackStudentEvent("test_started", {
+      practice_session_id: state.attemptId,
+      source: `practice_test_module_${state.moduleNumber}`,
+    });
+  }, [state.attemptId, state.moduleNumber, state.phase]);
+
+  useEffect(() => {
+    if (state.phase !== "module" || !question) return;
+    currentViewedAtRef.current = Date.now();
+    currentExitTrackedRef.current = false;
+    if (!firstViewedAtRef.current.has(question.id)) {
+      firstViewedAtRef.current.set(question.id, Date.now());
+    }
+    trackStudentEvent("question_viewed", {
+      question_id: question.id,
+      practice_session_id: state.attemptId,
+      source: "practice_test",
+    });
+  }, [question, state.attemptId, state.phase]);
 
   // --- Ending the module ----------------------------------------------------
   const endModule = useCallback(async () => {
@@ -112,6 +178,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
     endingRef.current = true;
     setBusy(true);
     setMessage(null);
+    recordCurrentExit();
 
     // Flush anything still waiting on its debounce, so a Submit pressed a
     // quarter-second after the last click does not drop that answer.
@@ -132,13 +199,17 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
     }
 
     if (result.next === "completed") {
+      trackStudentEvent("test_completed", {
+        practice_session_id: state.attemptId,
+        source: "practice_test",
+      });
       router.replace(`/practice/tests/review/${state.attemptId}`);
     } else {
       // Back to the server for the interstitial: the phase, and later module
       // 2's questions and deadline, all come from there.
       router.refresh();
     }
-  }, [router, state.attemptId]);
+  }, [recordCurrentExit, router, state.attemptId]);
 
   // --- The countdown --------------------------------------------------------
   // Stays here, not in `ExamTimer`. The tick is what decides a module is over,
@@ -175,6 +246,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
     // the student's next visit. Deliberately carries no scoring information —
     // it cannot be trusted to arrive, so nothing may depend on it.
     const onPageHide = () => {
+      recordCurrentExit();
       navigator.sendBeacon?.("/api/practice-tests/sweep");
     };
 
@@ -184,7 +256,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
       window.removeEventListener("beforeunload", onBeforeUnload);
       window.removeEventListener("pagehide", onPageHide);
     };
-  }, [state.phase]);
+  }, [recordCurrentExit, state.phase]);
 
   // --- Autosave -------------------------------------------------------------
   const select = (questionId: string, choice: number) => {
@@ -207,6 +279,37 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
           ...current,
           [questionId]: result.status === "ok" ? "saved" : "failed",
         }));
+        if (result.status === "ok" && !trackedAnswersRef.current.has(questionId)) {
+          trackedAnswersRef.current.add(questionId);
+          const answerTimeMs = Math.min(
+            Math.max(
+              0,
+              Date.now() -
+                (firstViewedAtRef.current.get(questionId) ?? Date.now()),
+            ),
+            7_200_000,
+          );
+          trackStudentEvent("question_answered", {
+            question_id: questionId,
+            practice_session_id: state.attemptId,
+            selected_choice: choice,
+            answer_time_ms: answerTimeMs,
+            used_desmos: desmosUsedIdsRef.current.has(questionId),
+            source: "practice_test",
+          });
+          if (
+            answerTimeMs >=
+            ANALYTICS_THRESHOLDS.struggleLongAnswerSeconds * 1_000
+          ) {
+            trackStudentEvent("question_struggled", {
+              question_id: questionId,
+              practice_session_id: state.attemptId,
+              answer_time_ms: answerTimeMs,
+              used_desmos: desmosUsedIdsRef.current.has(questionId),
+              source: "explainable_time_heuristic",
+            });
+          }
+        }
       }, AUTOSAVE_DELAY_MS),
     );
   };
@@ -328,6 +431,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
           <ExitButton
             href="/practice"
             label="Go back"
+            onLeave={recordCurrentExit}
             confirm={{
               heading: "Leave this module?",
               body: "The clock keeps running while you're away, and it isn't paused by leaving. Your answers are already saved — you can come back to this test and pick up where the timer has got to.",
@@ -359,7 +463,22 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
         <>
           <CalculatorToggle
             open={calculatorOpen}
-            onToggle={() => setCalculatorOpen((wasOpen) => !wasOpen)}
+            onToggle={() =>
+              setCalculatorOpen((wasOpen) => {
+                if (!wasOpen && question) {
+                  const firstUse = !desmosUsedIdsRef.current.has(question.id);
+                  desmosUsedIdsRef.current.add(question.id);
+                  if (firstUse) {
+                    trackStudentEvent("desmos_opened", {
+                      question_id: question.id,
+                      practice_session_id: state.attemptId,
+                      source: "practice_test",
+                    });
+                  }
+                }
+                return !wasOpen;
+              })
+            }
             controlsId={calculatorId}
           />
           <ReferenceSheet />
@@ -377,7 +496,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
         <QuestionNavigator
           items={navigatorItems}
           currentIndex={index}
-          onJump={setIndex}
+          onJump={goToQuestion}
           variant="answered"
           label="Questions in this module"
         />
@@ -386,7 +505,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
         <>
           <button
             type="button"
-            onClick={() => setIndex((current) => Math.max(0, current - 1))}
+            onClick={() => goToQuestion(Math.max(0, index - 1))}
             disabled={index === 0}
             className={examButtonClassName("secondary")}
           >
@@ -405,7 +524,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
           ) : (
             <button
               type="button"
-              onClick={() => setIndex((current) => current + 1)}
+              onClick={() => goToQuestion(index + 1)}
               className={examButtonClassName("primary")}
             >
               Next
@@ -451,7 +570,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
             // authoritative if the student had already selected an answer;
             // otherwise the reported item stays unanswered and follows the
             // test's existing scoring rule at module submission.
-            if (!isLast) setIndex((current) => current + 1);
+            if (!isLast) goToQuestion(index + 1);
           }}
         />
       </div>

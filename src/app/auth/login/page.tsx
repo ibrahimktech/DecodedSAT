@@ -23,7 +23,11 @@ const NOTICES: Record<string, string> = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; signed_out?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    signed_out?: string;
+    account_deleted?: string;
+  }>;
 }) {
   const params = await searchParams;
   const notice = params.error ? NOTICES[params.error] : undefined;
@@ -35,7 +39,9 @@ export default async function LoginPage({
           Welcome back
         </h1>
         <p className="mt-2 text-[0.9375rem] text-muted">
-          {params.signed_out
+          {params.account_deleted
+            ? "Your account and personal data were deleted."
+            : params.signed_out
             ? "You're signed out. See you soon."
             : "Pick up where you left off."}
         </p>

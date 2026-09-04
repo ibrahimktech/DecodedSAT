@@ -5,9 +5,9 @@
  *
  * Same order as every other action in this project: rate limit, parse, call
  * the database, answer failures with the shared generic message. The only
- * unusual part is what "already done" means here — it is not an error, it is
- * someone arriving at a flow they finished, so it redirects rather than
- * complaining.
+ * unusual part is what "already done" means here — it is not an error. A
+ * confirmed result returns to the wizard, which records completion and then
+ * navigates to the dashboard.
  *
  * This action is the second of three checks, not the check. `/onboarding`'s
  * page redirects finished students before the form ever renders, and
@@ -16,7 +16,6 @@
  */
 
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { describeError } from "@/lib/auth/describe-error";
 import {
@@ -144,20 +143,16 @@ export async function completeOnboardingAction(
       return failed;
     }
 
-    // The boolean the function returns is deliberately not branched on. `false`
-    // means the guard held — they had already onboarded and nothing was
-    // written — which is not a failure to report, just someone arriving at a
-    // flow they finished. Both outcomes end at the dashboard.
+    const completedNow = result.data === true;
+    revalidatePath("/dashboard", "layout");
+    return {
+      status: "sent",
+      message: completedNow ? "completed_now" : "already_complete",
+      attempt,
+    };
+
   } catch (error) {
     console.error(`[onboarding] submit threw: ${describeError(error)}`);
     return failed;
   }
-
-  // Outside the try on purpose: `redirect` signals by throwing, and catching
-  // it above would turn a successful setup into a generic error.
-  //
-  // Scoped to the signed-in subtree: the dashboard, the nav and Settings all
-  // render values this just wrote.
-  revalidatePath("/dashboard", "layout");
-  redirect("/dashboard");
 }

@@ -13,7 +13,7 @@
  * account is not real until the confirmation link fires the `profiles` trigger.
  */
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 import { ctaClassName } from "@/components/CtaButton";
 import { AuthField } from "@/components/auth/AuthField";
@@ -26,6 +26,7 @@ import {
   fieldErrors,
 } from "@/lib/auth/schemas";
 import { initialAuthFormState } from "@/lib/auth/state";
+import { trackProductEvent } from "@/lib/analytics/client";
 import { signUpAction } from "./actions";
 
 type Touched = { fullName: boolean; email: boolean; password: boolean };
@@ -48,6 +49,10 @@ export function SignupForm() {
     password: "",
   });
   const [touched, setTouched] = useState(NOTHING_TOUCHED);
+
+  useEffect(() => {
+    if (state.status === "sent") trackProductEvent("signup_requested");
+  }, [state.status]);
 
   // Validated against the same object the server will parse, minus the token —
   // that one is gated by the disabled submit button instead.

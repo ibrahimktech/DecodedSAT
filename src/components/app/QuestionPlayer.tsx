@@ -99,6 +99,8 @@ import {
 } from "@/components/app/exam/QuestionNavigator";
 import { ReferenceSheet } from "@/components/app/exam/ReferenceSheet";
 import { ctaClassName } from "@/components/CtaButton";
+import { trackStudentEvent } from "@/lib/analytics/client";
+import { ANALYTICS_THRESHOLDS } from "@/lib/analytics/constants";
 import { useExamFlags } from "@/lib/learn/exam-flags";
 import {
   CHOICE_LETTERS,
@@ -144,6 +146,9 @@ const ACTIVITY_EVENTS = [
   "wheel",
   "touchstart",
 ] as const;
+
+/** Kept outside React render analysis; callers use it only in effects/handlers. */
+const analyticsTimestamp = () => Date.now();
 
 /** The idle limit in prose: "15 minutes", or "45 seconds" under an override. */
 function describeIdleLimit(ms: number): string {
@@ -242,6 +247,14 @@ export function QuestionPlayer({
 
   const sessionRef = useRef<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const viewedQuestionRef = useRef<{
+    id: string;
+    startedAt: number;
+    answered: boolean;
+    exitTracked: boolean;
+  } | null>(null);
+  const answeredIdsRef = useRef(new Set<string>());
+  const desmosUsedIdsRef = useRef(new Set<string>());
 
   /** Ids already requested, so overlapping windows are not fetched twice. */
   const inFlightRef = useRef(new Set<string>());
@@ -295,6 +308,10 @@ export function QuestionPlayer({
       }
       sessionRef.current = id;
       setSessionId(id);
+      trackStudentEvent("practice_started", {
+        practice_session_id: id,
+        source: "question_bank",
+      });
     });
 
     return () => {
@@ -302,6 +319,50 @@ export function QuestionPlayer({
       endSession();
     };
   }, [endSession, sessionEpoch]);
+
+  const recordQuestionExit = useCallback(() => {
+    const viewed = viewedQuestionRef.current;
+    if (!viewed || viewed.answered || viewed.exitTracked) return;
+    viewed.exitTracked = true;
+    const answerTimeMs = Math.max(0, Date.now() - viewed.startedAt);
+    if (answerTimeMs >= ANALYTICS_THRESHOLDS.giveUpMinimumSeconds * 1_000) {
+      trackStudentEvent("question_gave_up", {
+        question_id: viewed.id,
+        practice_session_id: sessionRef.current ?? undefined,
+        answer_time_ms: Math.min(answerTimeMs, 7_200_000),
+        source: "question_bank",
+      });
+    } else if (
+      answerTimeMs >=
+      ANALYTICS_THRESHOLDS.skipMinimumSeconds * 1_000
+    ) {
+      trackStudentEvent("question_skipped", {
+        question_id: viewed.id,
+        practice_session_id: sessionRef.current ?? undefined,
+        answer_time_ms: Math.min(answerTimeMs, 7_200_000),
+        source: "question_bank",
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!question || finished || timedOut) return;
+    viewedQuestionRef.current = {
+      id: question.id,
+      startedAt: Date.now(),
+      answered: answeredIdsRef.current.has(question.id),
+      exitTracked: false,
+    };
+    trackStudentEvent("question_viewed", {
+      question_id: question.id,
+      practice_session_id: sessionRef.current ?? undefined,
+      difficulty: question.difficulty,
+      subtopic: question.subtopicName,
+      source: "question_bank",
+    });
+
+    return recordQuestionExit;
+  }, [question, finished, timedOut, recordQuestionExit]);
 
   // --- Keeping content ahead of the cursor ----------------------------------
   useEffect(() => {
@@ -396,6 +457,7 @@ export function QuestionPlayer({
   // rather than the ordinary close: that one stamps `now()` as the end, which
   // would bank the idle stretch as study time — the thing this exists to stop.
   const endForIdle = useCallback(() => {
+    recordQuestionExit();
     sessionRef.current = null;
     setSessionId(null);
     setIdleCountdown(null);
@@ -403,7 +465,7 @@ export function QuestionPlayer({
     setPaused(false);
     setTimedOut(true);
     void finalizeQuestionBankSessionsAction();
-  }, []);
+  }, [recordQuestionExit]);
 
   useEffect(() => {
     if (finished || timedOut) return;
@@ -507,6 +569,46 @@ export function QuestionPlayer({
       [answeredId]: { selected, verdict: result },
     }));
 
+    const viewed = viewedQuestionRef.current;
+    if (viewed?.id === answeredId) viewed.answered = true;
+    answeredIdsRef.current.add(answeredId);
+    const answerTimeMs = viewed?.id === answeredId
+      ? Math.min(Math.max(0, analyticsTimestamp() - viewed.startedAt), 7_200_000)
+      : undefined;
+    trackStudentEvent("question_answered", {
+      question_id: answeredId,
+      practice_session_id: sessionId ?? undefined,
+      correct: result.isCorrect,
+      selected_choice: selected,
+      answer_time_ms: answerTimeMs,
+      used_desmos: desmosUsedIdsRef.current.has(answeredId),
+      difficulty: question.difficulty,
+      subtopic: question.subtopicName,
+      source: "question_bank",
+    });
+    if (
+      answerTimeMs !== undefined &&
+      (answerTimeMs >= ANALYTICS_THRESHOLDS.struggleLongAnswerSeconds * 1_000 ||
+        (!result.isCorrect &&
+          answerTimeMs >=
+            ANALYTICS_THRESHOLDS.struggleWrongAnswerSeconds * 1_000))
+    ) {
+      trackStudentEvent("question_struggled", {
+        question_id: answeredId,
+        practice_session_id: sessionId ?? undefined,
+        correct: result.isCorrect,
+        answer_time_ms: answerTimeMs,
+        used_desmos: desmosUsedIdsRef.current.has(answeredId),
+        source: "explainable_time_heuristic",
+      });
+    }
+    trackStudentEvent("explanation_opened", {
+      question_id: answeredId,
+      practice_session_id: sessionId ?? undefined,
+      correct: result.isCorrect,
+      source: "automatic_after_answer",
+    });
+
     // The goal is a milestone, not a gate: it says so and the set carries on.
     sessionAnswersRef.current += 1;
     if (
@@ -519,11 +621,17 @@ export function QuestionPlayer({
   }
 
   function goTo(nextIndex: number) {
+    if (nextIndex !== index) recordQuestionExit();
     setIndex(nextIndex);
     setFailure(null);
   }
 
   function finish() {
+    recordQuestionExit();
+    trackStudentEvent("practice_completed", {
+      practice_session_id: sessionRef.current ?? undefined,
+      source: "question_bank",
+    });
     setFinished(true);
     setConfirmingFinish(false);
     endSession();
@@ -690,7 +798,22 @@ export function QuestionPlayer({
         <>
           <CalculatorToggle
             open={calculatorOpen}
-            onToggle={() => setCalculatorOpen((wasOpen) => !wasOpen)}
+            onToggle={() =>
+              setCalculatorOpen((wasOpen) => {
+                if (!wasOpen && question) {
+                  const firstUse = !desmosUsedIdsRef.current.has(question.id);
+                  desmosUsedIdsRef.current.add(question.id);
+                  if (firstUse) {
+                    trackStudentEvent("desmos_opened", {
+                      question_id: question.id,
+                      practice_session_id: sessionId ?? undefined,
+                      source: "question_bank",
+                    });
+                  }
+                }
+                return !wasOpen;
+              })
+            }
             controlsId={calculatorId}
           />
           <ReferenceSheet />

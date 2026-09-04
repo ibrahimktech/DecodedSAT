@@ -14,6 +14,8 @@ import { useEffect, useRef, useState } from "react";
 import { submitPracticeAttemptAction } from "@/app/(app)/practice/actions";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { ctaClassName } from "@/components/CtaButton";
+import { trackStudentEvent } from "@/lib/analytics/client";
+import { ANALYTICS_THRESHOLDS } from "@/lib/analytics/constants";
 import {
   CHOICE_LETTERS,
   formatSeconds,
@@ -44,12 +46,41 @@ export function TestRunner({
   const [error, setError] = useState<string | null>(null);
 
   const submittedRef = useRef(false);
+  const trackedAnswersRef = useRef(new Set<string>());
+  const firstViewedAtRef = useRef(new Map<string, number>());
+  const answerTimesRef = useRef(new Map<string, number>());
+  const currentViewedAtRef = useRef(Date.now());
+  const currentExitTrackedRef = useRef(false);
+  const exitCallbackRef = useRef<() => void>(() => undefined);
+
+  useEffect(() => {
+    trackStudentEvent("practice_started", {
+      practice_session_id: attemptId,
+      source: "timed_section",
+    });
+  }, [attemptId]);
+
+  useEffect(() => {
+    const current = questions[index];
+    if (!current) return;
+    currentViewedAtRef.current = Date.now();
+    currentExitTrackedRef.current = false;
+    if (!firstViewedAtRef.current.has(current.id)) {
+      firstViewedAtRef.current.set(current.id, Date.now());
+    }
+    trackStudentEvent("question_viewed", {
+      question_id: current.id,
+      practice_session_id: attemptId,
+      source: "timed_section",
+    });
+  }, [attemptId, index, questions]);
 
   async function submit() {
     if (submittedRef.current) return;
     submittedRef.current = true;
     setSubmitting(true);
     setError(null);
+    recordCurrentExit();
 
     const payload = {
       attemptId,
@@ -58,6 +89,34 @@ export function TestRunner({
         choice,
       })),
     };
+
+    for (const [questionId, choice] of Object.entries(answers)) {
+      if (trackedAnswersRef.current.has(questionId)) continue;
+      trackedAnswersRef.current.add(questionId);
+      trackStudentEvent("question_answered", {
+        question_id: questionId,
+        practice_session_id: attemptId,
+        selected_choice: choice,
+        answer_time_ms: answerTimesRef.current.get(questionId),
+        source: "timed_section",
+      });
+      const answerTimeMs = answerTimesRef.current.get(questionId);
+      if (
+        answerTimeMs !== undefined &&
+        answerTimeMs >= ANALYTICS_THRESHOLDS.struggleLongAnswerSeconds * 1_000
+      ) {
+        trackStudentEvent("question_struggled", {
+          question_id: questionId,
+          practice_session_id: attemptId,
+          answer_time_ms: answerTimeMs,
+          source: "explainable_time_heuristic",
+        });
+      }
+    }
+    trackStudentEvent("practice_completed", {
+      practice_session_id: attemptId,
+      source: "timed_section",
+    });
 
     // On success the action redirects and this promise never yields a value;
     // a returned object is always a failure to surface.
@@ -96,9 +155,54 @@ export function TestRunner({
   const unansweredCount = questions.length - answeredCount;
   const timeExpired = remaining <= 0;
 
+  function recordCurrentExit() {
+    if (answers[question.id] !== undefined || currentExitTrackedRef.current) return;
+    currentExitTrackedRef.current = true;
+    const answerTimeMs = Math.min(
+      Math.max(0, Date.now() - currentViewedAtRef.current),
+      7_200_000,
+    );
+    const eventName =
+      answerTimeMs >= ANALYTICS_THRESHOLDS.giveUpMinimumSeconds * 1_000
+        ? "question_gave_up"
+        : answerTimeMs >= ANALYTICS_THRESHOLDS.skipMinimumSeconds * 1_000
+          ? "question_skipped"
+          : null;
+    if (eventName) {
+      trackStudentEvent(eventName, {
+        question_id: question.id,
+        practice_session_id: attemptId,
+        answer_time_ms: answerTimeMs,
+        source: "timed_section",
+      });
+    }
+  }
+
+  useEffect(() => {
+    exitCallbackRef.current = recordCurrentExit;
+  });
+
+  useEffect(() => {
+    const onPageHide = () => exitCallbackRef.current();
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
+
+  function goToQuestion(nextIndex: number) {
+    if (nextIndex !== index) recordCurrentExit();
+    setIndex(nextIndex);
+  }
+
   function choose(choiceIndex: number) {
     if (timeExpired || submitting) return;
     setConfirming(false);
+    if (!answerTimesRef.current.has(question.id)) {
+      const startedAt = firstViewedAtRef.current.get(question.id) ?? Date.now();
+      answerTimesRef.current.set(
+        question.id,
+        Math.min(Math.max(0, Date.now() - startedAt), 7_200_000),
+      );
+    }
     setAnswers((current) => ({ ...current, [question.id]: choiceIndex }));
   }
 
@@ -126,7 +230,7 @@ export function TestRunner({
           <button
             key={entry.id}
             type="button"
-            onClick={() => setIndex(entryIndex)}
+            onClick={() => goToQuestion(entryIndex)}
             aria-label={`Question ${entryIndex + 1}${
               answers[entry.id] !== undefined ? ", answered" : ""
             }`}
@@ -187,7 +291,7 @@ export function TestRunner({
               delete next[question.id];
               return next;
             });
-            if (index + 1 < questions.length) setIndex(index + 1);
+            if (index + 1 < questions.length) goToQuestion(index + 1);
           }}
         />
       </div>
@@ -205,7 +309,7 @@ export function TestRunner({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setIndex(Math.max(0, index - 1))}
+            onClick={() => goToQuestion(Math.max(0, index - 1))}
             disabled={index === 0 || submitting}
             className={ctaClassName("secondary")}
           >
@@ -213,7 +317,7 @@ export function TestRunner({
           </button>
           <button
             type="button"
-            onClick={() => setIndex(Math.min(questions.length - 1, index + 1))}
+            onClick={() => goToQuestion(Math.min(questions.length - 1, index + 1))}
             disabled={index === questions.length - 1 || submitting}
             className={ctaClassName("secondary")}
           >

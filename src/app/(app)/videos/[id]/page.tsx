@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
+import { TrackedYouTubePlayer } from "@/components/app/TrackedYouTubePlayer";
 import { requireUser } from "@/lib/auth/require-user";
 import { getVideo } from "@/lib/learn/data";
 
@@ -23,8 +24,10 @@ export const metadata: Metadata = {
  */
 export default async function WatchVideoPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ questionId?: string; source?: string }>;
 }) {
   const { supabase } = await requireUser();
 
@@ -37,7 +40,18 @@ export default async function WatchVideoPage({
 
   // Ids come from the seeded `videos` table, never from user input — the
   // encoding is belt-and-braces against a malformed row, not a trust boundary.
-  const safeId = encodeURIComponent(video.youtubeId);
+  const query = await searchParams;
+  const parsedQuestionId = z.uuid().safeParse(query.questionId);
+  let explanationQuestionId: string | undefined;
+  if (parsedQuestionId.success && query.source === "question_explanation") {
+    const { data: link } = await supabase
+      .from("attempted_question_solutions")
+      .select("question_id, solution_video_id")
+      .eq("question_id", parsedQuestionId.data)
+      .eq("solution_video_id", video.id)
+      .maybeSingle();
+    if (link) explanationQuestionId = parsedQuestionId.data;
+  }
 
   return (
     <div className="mx-auto max-w-[max(20rem,calc((100vh-16rem)*16/9))] min-w-0">
@@ -63,12 +77,12 @@ export default async function WatchVideoPage({
       </Link>
 
       <div className="mt-4 aspect-video w-full overflow-hidden rounded-2xl border border-hairline bg-ink">
-        <iframe
-          src={`https://www.youtube-nocookie.com/embed/${safeId}?rel=0`}
+        <TrackedYouTubePlayer
+          videoId={video.id}
+          youtubeId={video.youtubeId}
           title={video.title}
-          allow="encrypted-media; picture-in-picture"
-          allowFullScreen
-          className="h-full w-full"
+          videoType={explanationQuestionId ? "explanation" : "general"}
+          questionId={explanationQuestionId}
         />
       </div>
 

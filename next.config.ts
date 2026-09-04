@@ -11,9 +11,9 @@ import type { NextConfig } from "next";
  * `form-action` are locked to self. Revisit with nonces if a route ever needs
  * to be dynamic anyway.
  *
- * Third-party origins are listed one vendor at a time, each scoped to the exact
- * host and the exact directives it needs, never a wildcard and never a
- * loosened directive shared between two of them.
+ * Third-party origins are listed one vendor at a time and scoped to the
+ * directives they need. PostHog is the one host wildcard because its official
+ * web setup uses regional ingestion and replay hosts under *.posthog.com.
  */
 
 /**
@@ -47,6 +47,8 @@ const YOUTUBE_THUMBNAIL_ORIGIN = "https://i.ytimg.com";
  * See `<CalculatorPanel />` for what the swap costs.
  */
 const DESMOS_ORIGIN = "https://www.desmos.com";
+const POSTHOG_ORIGIN = "https://*.posthog.com";
+const YOUTUBE_API_ORIGIN = "https://www.youtube.com";
 
 /**
  * React's development build calls `eval()` to reconstruct callstacks across
@@ -60,6 +62,8 @@ const DESMOS_ORIGIN = "https://www.desmos.com";
 const scriptSrc = [
   "'self'",
   "'unsafe-inline'",
+  POSTHOG_ORIGIN,
+  YOUTUBE_API_ORIGIN,
   ...(process.env.NODE_ENV === "production" ? [] : ["'unsafe-eval'"]),
 ].join(" ");
 
@@ -77,7 +81,8 @@ const contentSecurityPolicy = [
   `frame-src 'self' ${YOUTUBE_EMBED_ORIGIN} ${DESMOS_ORIGIN}`,
   // Unrelated to the above: this governs who may frame *us*, and stays closed.
   "frame-ancestors 'none'",
-  "connect-src 'self'",
+  `connect-src 'self' ${POSTHOG_ORIGIN} ${YOUTUBE_API_ORIGIN}`,
+  "worker-src 'self' blob: data:",
   "form-action 'self'",
   "base-uri 'self'",
   "object-src 'none'",

@@ -1,5 +1,9 @@
+"use client";
+
+import { useEffect } from "react";
 import Link from "next/link";
 import type { SolutionVideo } from "@/lib/learn/types";
+import { trackStudentEvent } from "@/lib/analytics/client";
 
 function PlayIcon({ className }: { className?: string }) {
   return (
@@ -33,6 +37,24 @@ export function SolutionVideoLink({
   answerResult: "correct" | "incorrect";
   emphasis: "primary" | "secondary";
 }) {
+  useEffect(() => {
+    trackStudentEvent("explanation_button_shown", {
+      question_id: questionId,
+      video_id: video.id,
+      answer_result: answerResult,
+      source: "question_feedback",
+    });
+  }, [answerResult, questionId, video.id]);
+
+  const href = `/videos/${encodeURIComponent(video.id)}?questionId=${encodeURIComponent(questionId)}&source=question_explanation`;
+  const onClick = () =>
+    trackStudentEvent("watch_explanation_clicked", {
+      question_id: questionId,
+      video_id: video.id,
+      answer_result: answerResult,
+      video_type: "explanation",
+      source: "question_feedback",
+    });
   const trackingAttributes = {
     "data-question-id": questionId,
     "data-video-id": video.id,
@@ -42,7 +64,8 @@ export function SolutionVideoLink({
   if (emphasis === "secondary") {
     return (
       <Link
-        href={`/videos/${encodeURIComponent(video.id)}`}
+        href={href}
+        onClick={onClick}
         target="_blank"
         rel="noopener noreferrer"
         aria-label={`Watch solution video: ${video.title}`}
@@ -57,7 +80,8 @@ export function SolutionVideoLink({
 
   return (
     <Link
-      href={`/videos/${encodeURIComponent(video.id)}`}
+      href={href}
+      onClick={onClick}
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`Watch video solution: ${video.title}`}

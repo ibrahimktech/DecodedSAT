@@ -12,7 +12,10 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { deletePostHogPerson } from "@/lib/analytics/posthog-server";
 import { describeError } from "@/lib/auth/describe-error";
+import { ONBOARDED_COOKIE } from "@/lib/auth/onboarded-cookie";
 import {
   type AuthFormState,
   GENERIC_ERROR_MESSAGE,
@@ -21,6 +24,7 @@ import {
 import { PasswordChangeSchema } from "@/lib/learn/schemas";
 import { StudyPlanSchema } from "@/lib/onboarding/schemas";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
@@ -103,6 +107,96 @@ const studyPlanLimiter = createRateLimiter({
   windowMs: 60 * 60_000,
   prefix: "study-plan",
 });
+
+const deleteAccountLimiter = createRateLimiter({
+  limit: 3,
+  windowMs: 60 * 60_000,
+  prefix: "delete-account",
+});
+
+export type DeleteAccountState = {
+  status: "idle" | "error" | "deleted";
+  message: string;
+  attempt: number;
+  posthogCleanup?: "deleted" | "not_found" | "not_configured" | "failed";
+};
+
+/** Authenticated, self-only permanent account deletion. */
+export async function deleteAccountAction(
+  previous: DeleteAccountState,
+  formData: FormData,
+): Promise<DeleteAccountState> {
+  const attempt = previous.attempt + 1;
+  const failed = (message = "We couldn't delete your account. Your account is still active.") => ({
+    status: "error" as const,
+    message,
+    attempt,
+  });
+
+  try {
+    if (formData.get("confirmation") !== "DELETE") {
+      return failed("Type DELETE exactly to confirm permanent deletion.");
+    }
+
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return failed();
+
+    const { data: isAdmin, error: roleError } = await supabase.rpc("is_admin");
+    if (roleError || isAdmin === true) return failed();
+
+    const rate = await deleteAccountLimiter.check(user.id);
+    if (!rate.ok) return failed("Too many attempts. Please wait and try again.");
+
+    // Remove the external identifiable history first. If PostHog collection is
+    // enabled, missing/failed privacy credentials block Auth deletion instead
+    // of leaving an unreachable PostHog identity behind.
+    let posthogCleanup: DeleteAccountState["posthogCleanup"] = "not_configured";
+    try {
+      posthogCleanup = await deletePostHogPerson(user.id);
+    } catch (error) {
+      console.error("[settings] PostHog account cleanup failed", { error });
+      return failed("Account deletion is temporarily unavailable. Please try again.");
+    }
+    if (
+      process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN &&
+      posthogCleanup === "not_configured"
+    ) {
+      console.error("[settings] PostHog is enabled without privacy deletion credentials");
+      return failed("Account deletion is temporarily unavailable. Please try again.");
+    }
+
+    // The user id comes exclusively from the verified session. No caller can
+    // supply another account id. Profile-owned data cascades only if Auth
+    // deletion succeeds, avoiding a partially emptied live account.
+    const admin = createSupabaseAdminClient();
+    const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
+    if (deleteError) {
+      console.error(`[settings] auth user deletion failed: ${deleteError.message}`);
+      return failed();
+    }
+
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch {
+      // The Auth account is already gone; cookie deletion below is sufficient.
+    }
+    (await cookies()).delete(ONBOARDED_COOKIE);
+    revalidatePath("/dashboard", "layout");
+
+    return {
+      status: "deleted",
+      message: "Your account was permanently deleted.",
+      attempt,
+      posthogCleanup,
+    };
+  } catch (error) {
+    console.error(`[settings] account deletion threw: ${describeError(error)}`);
+    return failed();
+  }
+}
 
 /**
  * Edits the three fields onboarding captured that legitimately change: target

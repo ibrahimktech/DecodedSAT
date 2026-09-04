@@ -61,6 +61,18 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    href: "/admin/analytics",
+    label: "Analytics",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <path d="M4 20V10" />
+        <path d="M10 20V4" />
+        <path d="M16 20v-7" />
+        <path d="M22 20H2" />
+      </svg>
+    ),
+  },
+  {
     href: "/admin/question-reports",
     label: "Question Reports",
     icon: (
