@@ -205,8 +205,9 @@ export async function deleteAccountAction(
  * The current-score estimate and the SAT history are deliberately absent. They
  * are the baseline progress is measured against, and a baseline you can edit
  * measures nothing. `update_study_plan()` cannot write them, cannot write
- * `onboarding_completed_at`, and refuses to run at all before onboarding is
- * finished — so this is not a back door into the flow.
+ * `onboarding_completed_at`, and refuses to run before onboarding is finished
+ * except for admins, who are deliberately exempt from onboarding — so this is
+ * not a back door into the flow for students.
  */
 export async function updateStudyPlanAction(
   previous: AuthFormState,
@@ -263,8 +264,8 @@ export async function updateStudyPlanAction(
       return failed;
     }
 
-    // `false` means the row was not matched — the caller has not onboarded, so
-    // there is no plan to edit. Not something Settings can offer a fix for.
+    // `false` means the row was not matched: the caller is neither onboarded
+    // nor an onboarding-exempt admin, so there is no plan to edit here.
     if (result.data !== true) return failed;
 
     revalidatePath("/dashboard", "layout");

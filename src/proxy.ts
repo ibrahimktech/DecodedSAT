@@ -30,11 +30,16 @@ import {
   ONBOARDED_COOKIE,
   ONBOARDED_COOKIE_OPTIONS,
 } from "@/lib/auth/onboarded-cookie";
+import { PASSWORD_RECOVERY_COOKIE } from "@/lib/auth/recovery-session";
 import { APP_URL, SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "@/lib/env";
 import { AUTH_COOKIE_OPTIONS } from "@/lib/supabase/cookie-options";
 
 /** Signed-in visitors have no use for these. */
-const AUTH_FORM_PATHS = ["/auth/login", "/auth/signup"];
+const AUTH_FORM_PATHS = [
+  "/auth/login",
+  "/auth/signup",
+  "/auth/forgot-password",
+];
 
 /**
  * The signed-in app's route prefixes. Keep in sync with the pages under
@@ -115,6 +120,24 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+
+  // A recovery link establishes a real Supabase session because `updateUser`
+  // requires one. Keep that short-lived session on its single-purpose screen;
+  // successful password update signs it out and removes the marker.
+  const isRecoveryPath =
+    pathname === "/auth/reset-password" ||
+    pathname.startsWith("/auth/reset-password/") ||
+    pathname === "/auth/callback";
+  if (
+    user &&
+    request.cookies.get(PASSWORD_RECOVERY_COOKIE)?.value === user.id &&
+    !isRecoveryPath
+  ) {
+    return withCookiesFrom(
+      response,
+      NextResponse.redirect(new URL("/auth/reset-password", request.url)),
+    );
+  }
 
   /**
    * `session_flags()` answers both routing questions in one round trip, and

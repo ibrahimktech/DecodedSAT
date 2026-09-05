@@ -49,6 +49,7 @@ export function SignupForm() {
     password: "",
   });
   const [touched, setTouched] = useState(NOTHING_TOUCHED);
+  const [dismissedAttempt, setDismissedAttempt] = useState<number | null>(null);
 
   useEffect(() => {
     if (state.status === "sent") trackProductEvent("signup_requested");
@@ -57,15 +58,19 @@ export function SignupForm() {
   // Validated against the same object the server will parse, minus the token —
   // that one is gated by the disabled submit button instead.
   const errors = fieldErrors(SignupSchema, values);
+  const showServerFeedback = dismissedAttempt !== state.attempt;
 
-  const setField = (field: keyof typeof values) => (value: string) =>
+  const setField = (field: keyof typeof values) => (value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
+    if (state.status !== "idle") setDismissedAttempt(state.attempt);
+  };
 
   const markTouched = (field: keyof Touched) => () =>
     setTouched((current) => ({ ...current, [field]: true }));
 
   const errorFor = (field: keyof Touched) =>
-    touched[field] ? errors[field] : undefined;
+    (touched[field] ? errors[field] : undefined) ??
+    (showServerFeedback ? state.fieldErrors?.[field] : undefined);
 
   if (state.status === "sent") {
     return <CheckYourEmail email={values.email} />;
@@ -76,6 +81,7 @@ export function SignupForm() {
       <form
         action={formAction}
         onSubmit={(event) => {
+          setDismissedAttempt(state.attempt);
           // React honours preventDefault here and skips the action, so this
           // surfaces every field error at once instead of bouncing off the
           // server for something the browser already knew.
@@ -87,7 +93,7 @@ export function SignupForm() {
         noValidate
         className="flex flex-col gap-4"
       >
-        {state.status !== "idle" && state.message && (
+        {showServerFeedback && state.status !== "idle" && state.message && (
           <FormMessage>{state.message}</FormMessage>
         )}
 

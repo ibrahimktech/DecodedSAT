@@ -13,20 +13,22 @@
  *   2. Re-validate every field against the same Zod schema the form used
  *   3. Sanitise the display name
  *   4. Hand off to Supabase
- *   5. Return one of a small set of generic outcomes
+ *   5. Return a safe message selected from stable Supabase error codes
  */
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { APP_URL, AUTH_CALLBACK_URL } from "@/lib/env";
+import { signupAuthFailure } from "@/lib/auth/error-messages";
 import { sanitizeFullName } from "@/lib/auth/sanitize";
-import { FULL_NAME_MAX, FULL_NAME_MIN, SignupSchema } from "@/lib/auth/schemas";
 import {
-  type AuthFormState,
-  GENERIC_ERROR_MESSAGE,
-  rateLimitedMessage,
-} from "@/lib/auth/state";
+  fieldErrors,
+  FULL_NAME_MAX,
+  FULL_NAME_MIN,
+  SignupSchema,
+} from "@/lib/auth/schemas";
+import { type AuthFormState } from "@/lib/auth/state";
 import { describeError } from "@/lib/auth/describe-error";
 import { createRateLimiter, getClientIp, limitFromEnv } from "@/lib/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -63,18 +65,13 @@ export async function signUpAction(
   formData: FormData,
 ): Promise<AuthFormState> {
   const attempt = previous.attempt + 1;
-  const failed: AuthFormState = {
-    status: "error",
-    message: GENERIC_ERROR_MESSAGE,
-    attempt,
-  };
 
   // 1. Rate limit ------------------------------------------------------------
   const rate = await signupLimiter.check(getClientIp(await headers()));
   if (!rate.ok) {
     return {
       status: "rate_limited",
-      message: rateLimitedMessage(rate.retryAfterSeconds),
+      message: "Too many signup attempts. Please try again later.",
       attempt,
     };
   }
@@ -82,16 +79,20 @@ export async function signUpAction(
   // 2. Validate --------------------------------------------------------------
   // `FormData.get` yields `string | File | null`; the schema rejects all three
   // non-string cases without any pre-checking here.
-  const parsed = SignupSchema.safeParse({
+  const input = {
     fullName: formData.get("fullName"),
     email: formData.get("email"),
     password: formData.get("password"),
-  });
+  };
+  const parsed = SignupSchema.safeParse(input);
 
   if (!parsed.success) {
-    // No field names, no issue list. The form already told the person what was
-    // wrong client-side; a bot gets nothing it can iterate against.
-    return failed;
+    return {
+      status: "error",
+      message: "",
+      fieldErrors: fieldErrors(SignupSchema, input),
+      attempt,
+    };
   }
 
   // 3. Sanitise --------------------------------------------------------------
@@ -99,7 +100,12 @@ export async function signUpAction(
   if (fullName.length < FULL_NAME_MIN) {
     // The name was long enough to validate but consisted of characters that did
     // not survive sanitisation.
-    return failed;
+    return {
+      status: "error",
+      message: "",
+      fieldErrors: { fullName: "Enter your full name." },
+      attempt,
+    };
   }
 
   // 4. Sign up ---------------------------------------------------------------
@@ -124,52 +130,24 @@ export async function signUpAction(
       // object arguments as "{}", which is how the real cause of a broken
       // signup stays invisible while looking like it is being logged.
       //
-      // `message` is included deliberately. It is the difference between
-      // "signup is broken" and the actual provider error, and
-      // this is a server log — the client still receives only the generic
-      // string below. Withholding it here buys no security and costs an hour.
+      // `message` stays in the server log for diagnosis. The client receives
+      // only a message selected from the stable error code.
       console.error(
         `[auth] signup failed: ${error.code ?? "no_code"} ` +
           `(status ${error.status ?? "?"}) — ${error.message}`,
       );
 
-      // Supabase's own enumeration protection, when enabled in the dashboard,
-      // returns success for an address that already exists. When it is off,
-      // the same case arrives here as an error. Reporting "sent" either way
-      // makes our surface behave identically regardless of that setting, so a
-      // prober cannot use this action to test whether an address is registered.
-
-      if (error.code === "user_already_exists") {
-        return { status: "sent", message: "", attempt };
-      }
-
-      if (error.status === 429) {
-        // Supabase's *email sending* cap is the one people actually hit, and
-        // it resets on the hour — not in sixty seconds. Telling someone to
-        // "wait a minute" here is worse than saying nothing: they retry
-        // immediately, every retry fails the same way, and the retries spend
-        // this app's own IP budget until the login form starts refusing them
-        // too. The honest number is what stops that loop.
-        //
-        // Project-wide condition, not an account-specific one, so saying it
-        // plainly leaks nothing about whether an address is registered.
-        const retryAfterSeconds =
-          error.code === "over_email_send_rate_limit" ? 60 * 60 : 60;
-
-        return {
-          status: "rate_limited",
-          message: rateLimitedMessage(retryAfterSeconds),
-          attempt,
-        };
-      }
-
-      return failed;
+      return { ...signupAuthFailure(error), attempt };
     }
 
     // With enumeration protection on, an existing address comes back as a user
-    // with an empty `identities` array and no email is sent. Same response.
+    // with an empty `identities` array and no email is sent.
     if (data.user && data.user.identities?.length === 0) {
-      return { status: "sent", message: "", attempt };
+      return {
+        status: "error",
+        message: "An account with this email already exists.",
+        attempt,
+      };
     }
 
     // Supabase returns a session here only when "Confirm email" is turned off
@@ -187,10 +165,9 @@ export async function signUpAction(
       return { status: "sent", message: "", attempt };
     }
   } catch (error) {
-    // Missing env vars land here too, and get the same message as everything
-    // else. Detail stays in the server log.
+    // Missing env vars land here too. Detail stays in the server log.
     console.error(`[auth] signup threw: ${describeError(error)}`);
-    return failed;
+    return { ...signupAuthFailure(error), attempt };
   }
 
   // Outside the try on purpose — `redirect` signals by throwing, and catching
@@ -202,5 +179,9 @@ export async function signUpAction(
     redirect(APP_URL);
   }
 
-  return failed;
+  return {
+    status: "error",
+    message: "Something went wrong. Please try again.",
+    attempt,
+  };
 }

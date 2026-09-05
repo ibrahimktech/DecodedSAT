@@ -33,14 +33,20 @@ const fullNameField = z
  * stored in one canonical form rather than rejected on whitespace.
  */
 const emailField = z
-  .string()
+  .string("Email is required.")
   .trim()
   .toLowerCase()
-  .pipe(z.email("Enter a valid email address.").max(EMAIL_MAX));
+  .pipe(
+    z
+      .string()
+      .min(1, "Email is required.")
+      .pipe(z.email("Enter a valid email address.").max(EMAIL_MAX)),
+  );
 
 const passwordField = z
-  .string()
-  .min(PASSWORD_MIN, `Use at least ${PASSWORD_MIN} characters.`)
+  .string("Password is required.")
+  .min(1, "Password is required.")
+  .min(PASSWORD_MIN, `Password must be at least ${PASSWORD_MIN} characters.`)
   .max(PASSWORD_MAX, `Keep this under ${PASSWORD_MAX} characters.`);
 
 export const SignupSchema = z.object({
@@ -56,20 +62,41 @@ export const SignupSchema = z.object({
  */
 export const LoginSchema = z.object({
   email: emailField,
-  password: z.string().min(1).max(PASSWORD_MAX),
+  password: z
+    .string("Password is required.")
+    .min(1, "Password is required.")
+    .max(PASSWORD_MAX, "Password is too long."),
 });
+
+export const ForgotPasswordSchema = z.object({
+  email: emailField,
+});
+
+export const ResetPasswordSchema = z
+  .object({
+    password: passwordField,
+    confirmPassword: z
+      .string("Confirm your password.")
+      .min(1, "Confirm your password."),
+  })
+  .refine((values) => values.password === values.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Passwords do not match.",
+  });
 
 export type SignupInput = z.infer<typeof SignupSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
+export type ForgotPasswordInput = z.infer<typeof ForgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>;
 
 /**
  * Field-level errors for the client forms only.
  *
- * Never call this on the server response path — surfacing which field failed
- * is exactly the signal that makes automated probing cheap.
+ * Server actions may also use this for input-validation errors. Provider
+ * failures are mapped separately and raw provider text is never returned.
  */
 export function fieldErrors(
-  schema: typeof SignupSchema | typeof LoginSchema,
+  schema: z.ZodType,
   values: Record<string, unknown>,
 ): Record<string, string> {
   const parsed = schema.safeParse(values);

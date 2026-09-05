@@ -27,6 +27,7 @@ export default async function LoginPage({
     error?: string;
     signed_out?: string;
     account_deleted?: string;
+    password_reset?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -47,7 +48,14 @@ export default async function LoginPage({
         </p>
       </div>
 
-      <LoginForm notice={notice} />
+      <LoginForm
+        notice={notice}
+        successNotice={
+          params.password_reset
+            ? "Your password has been updated. Sign in with your new password."
+            : undefined
+        }
+      />
     </>
   );
 }

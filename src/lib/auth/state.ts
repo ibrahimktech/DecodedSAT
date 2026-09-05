@@ -18,8 +18,10 @@ export type AuthFormStatus =
 
 export type AuthFormState = {
   status: AuthFormStatus;
-  /** Safe to render. Never contains a provider message or a field name. */
+  /** Safe to render. Never contains a raw provider message. */
   message: string;
+  /** Safe, contextual validation errors keyed to the associated form field. */
+  fieldErrors?: Record<string, string>;
   /**
    * Incremented by the action on every submission. Forms key their field
    * subtree on it so a completed attempt remounts cleanly.
@@ -34,11 +36,10 @@ export const initialAuthFormState: AuthFormState = {
 };
 
 /**
- * The only failure message the signup and login paths ever show.
+ * Generic failure for non-auth forms that share this state shape.
  *
- * One string for every cause — bad password, malformed email, Supabase
- * unreachable, missing env vars — because a response that varies with the
- * cause is an oracle. Detail goes to `console.error` on the server instead.
+ * Login, signup and password recovery use contextual, provider-code-based
+ * messages. Raw provider text still never reaches the browser.
  */
 export const GENERIC_ERROR_MESSAGE =
   "We couldn't complete that request. Please check your details and try again.";

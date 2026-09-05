@@ -3,23 +3,18 @@
 /**
  * Sign-in Server Action.
  *
- * Same shape as signup: no Supabase call ever leaves the server, and every
- * failure returns one indistinguishable message. Sign-in is the more sensitive
- * of the two — a response that differs between "no such account" and "wrong
- * password" turns the form into an account-existence oracle — so the generic
- * message here is load-bearing, not politeness.
+ * No Supabase call leaves the server. Stable provider error codes are mapped
+ * to a small set of contextual messages; raw provider text remains server-only.
+ * A nonexistent account and a wrong password deliberately share one response.
  */
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { APP_URL } from "@/lib/env";
-import { LoginSchema } from "@/lib/auth/schemas";
-import {
-  type AuthFormState,
-  GENERIC_ERROR_MESSAGE,
-  rateLimitedMessage,
-} from "@/lib/auth/state";
+import { loginAuthFailure } from "@/lib/auth/error-messages";
+import { fieldErrors, LoginSchema } from "@/lib/auth/schemas";
+import { type AuthFormState } from "@/lib/auth/state";
 import { describeError } from "@/lib/auth/describe-error";
 import { createRateLimiter, getClientIp, limitFromEnv } from "@/lib/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -75,27 +70,30 @@ export async function logInAction(
   formData: FormData,
 ): Promise<AuthFormState> {
   const attempt = previous.attempt + 1;
-  const failed: AuthFormState = {
-    status: "error",
-    message: GENERIC_ERROR_MESSAGE,
-    attempt,
-  };
 
   const rate = await loginIpLimiter.check(getClientIp(await headers()));
   if (!rate.ok) {
     return {
       status: "rate_limited",
-      message: rateLimitedMessage(rate.retryAfterSeconds),
+      message: "Too many login attempts. Please try again later.",
       attempt,
     };
   }
 
-  const parsed = LoginSchema.safeParse({
+  const input = {
     email: formData.get("email"),
     password: formData.get("password"),
-  });
+  };
+  const parsed = LoginSchema.safeParse(input);
 
-  if (!parsed.success) return failed;
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "",
+      fieldErrors: fieldErrors(LoginSchema, input),
+      attempt,
+    };
+  }
 
   const accountRate = await loginAccountLimiter.check(
     await accountKey(parsed.data.email),
@@ -103,7 +101,7 @@ export async function logInAction(
   if (!accountRate.ok) {
     return {
       status: "rate_limited",
-      message: rateLimitedMessage(accountRate.retryAfterSeconds),
+      message: "Too many login attempts. Please try again later.",
       attempt,
     };
   }
@@ -124,14 +122,12 @@ export async function logInAction(
     });
 
     if (error) {
-      // `email_not_confirmed` is deliberately folded in with bad credentials:
-      // distinguishing it would confirm the address is registered.
       console.error(
         `[auth] sign-in failed: ${error.code ?? "no_code"} ` +
           `(status ${error.status ?? "?"}) — ${error.message}`,
       );
 
-      return failed;
+      return { ...loginAuthFailure(error), attempt };
     }
 
     const adminCheck = await supabase.rpc("is_admin");
@@ -141,7 +137,7 @@ export async function logInAction(
     isAdmin = adminCheck.data === true;
   } catch (error) {
     console.error(`[auth] sign-in threw: ${describeError(error)}`);
-    return failed;
+    return { ...loginAuthFailure(error), attempt };
   }
 
   // Outside the try block on purpose — `redirect` signals by throwing, and

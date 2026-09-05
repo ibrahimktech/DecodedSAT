@@ -51,6 +51,14 @@ export const APP_URL = trimTrailingSlash(
 export const AUTH_CALLBACK_URL = `${SITE_URL}/auth/callback`;
 
 /**
+ * Recovery uses the existing callback, with a fixed intent marker so provider
+ * failures that arrive before a session exists still land on the right UI.
+ * The marker chooses a safe local destination; it grants no authority.
+ */
+export const PASSWORD_RECOVERY_CALLBACK_URL =
+  `${AUTH_CALLBACK_URL}?intent=recovery`;
+
+/**
  * The anon key is designed to ship to the browser: it carries no privileges of
  * its own, and Row Level Security — not the key — is the access boundary. The
  * `service_role` key is the opposite: it is read only by the server-only admin

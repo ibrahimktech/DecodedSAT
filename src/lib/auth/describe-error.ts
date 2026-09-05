@@ -8,7 +8,7 @@
  *
  * Server-side only, by convention rather than by `server-only` — the callers
  * are all actions and route handlers. Nothing this returns is ever sent to a
- * client; the auth surfaces answer with `GENERIC_ERROR_MESSAGE` regardless.
+ * client; auth surfaces map only stable error codes to safe copy.
  */
 export function describeError(error: unknown): string {
   if (error instanceof Error) {
