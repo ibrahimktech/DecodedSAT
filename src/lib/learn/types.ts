@@ -6,6 +6,8 @@
  * imports — types, constants and pure helpers only.
  */
 
+import type { QuestionContentBlock } from "@/lib/questions/content";
+
 export type Difficulty = "easy" | "medium" | "hard";
 
 export const DIFFICULTIES: readonly Difficulty[] = ["easy", "medium", "hard"];
@@ -37,6 +39,7 @@ export type Subtopic = {
 export type PlayableQuestion = {
   id: string;
   prompt: string;
+  contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
   difficulty: Difficulty;
   subtopicName: string;
@@ -97,6 +100,7 @@ export type QuestionVerdict =
 export type PracticeQuestion = {
   id: string;
   prompt: string;
+  contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
 };
 

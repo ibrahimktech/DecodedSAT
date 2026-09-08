@@ -12,6 +12,7 @@ import {
 import { CreateQuestionSchema } from "@/lib/admin/schemas";
 import type { AdminVideoOption, QuestionSetOption } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
+import { legacyPromptToBlocks } from "@/lib/questions/content";
 
 const FIELD_CLASS =
   "rounded-xl border border-hairline bg-surface px-3 py-2 text-[0.9375rem] text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent";
@@ -39,9 +40,11 @@ export function ManualQuestionForm({
   videos: AdminVideoOption[];
 }) {
   const router = useRouter();
+  const [questionId] = useState(() => crypto.randomUUID());
   const firstDomain = domains[0]?.id ?? "";
   const [draft, setDraft] = useState<QuestionDraft>({
     prompt: "",
+    contentBlocks: legacyPromptToBlocks(""),
     choices: ["", "", "", ""],
     correctChoice: -1,
     explanation: "",
@@ -65,8 +68,10 @@ export function ManualQuestionForm({
     setMessage(null);
 
     const input = {
+      id: questionId,
       subtopicId: draft.subtopicId,
       prompt: draft.prompt,
+      contentBlocks: draft.contentBlocks,
       choices: draft.choices,
       correctChoice: draft.correctChoice,
       explanation: draft.explanation,
@@ -115,6 +120,7 @@ export function ManualQuestionForm({
     >
       <QuestionFormFields
         idPrefix="create-question"
+        questionId={questionId}
         value={draft}
         onChange={(value) => {
           setMessage(null);
@@ -122,6 +128,12 @@ export function ManualQuestionForm({
           setErrors((current) => {
             const next = { ...current };
             if (value.prompt !== draft.prompt) delete next.prompt;
+            if (value.contentBlocks !== draft.contentBlocks) {
+              delete next.contentBlocks;
+              Object.keys(next)
+                .filter((key) => key.startsWith("contentBlocks."))
+                .forEach((key) => delete next[key]);
+            }
             if (value.explanation !== draft.explanation) delete next.explanation;
             if (value.subtopicId !== draft.subtopicId) delete next.subtopicId;
             if (value.correctChoice !== draft.correctChoice) {

@@ -69,6 +69,61 @@ export function UploadQuestionsPanel() {
         exists in that set.
       </p>
 
+      <details className="mt-3 rounded-xl border border-hairline bg-background p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-ink">
+          JSON format and rich content
+        </summary>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          Existing files with <code className="rounded bg-surface px-1">prompt</code>{" "}
+          still work unchanged. You may also use <code className="rounded bg-surface px-1">question_text</code>{" "}
+          as its alias, or add <code className="rounded bg-surface px-1">content_blocks</code>.
+          Text and table cells keep single-dollar inline LaTeX; centered equations contain raw LaTeX without dollar signs.
+        </p>
+        <pre className="mt-3 overflow-x-auto rounded-lg bg-surface p-3 text-xs leading-relaxed text-ink">
+{`{
+  "set_name": "Rich content examples",
+  "questions": [{
+    "external_id": "rich-001",
+    "domain": "Algebra",
+    "subtopic": "Solving linear equations",
+    "prompt": "The equation below represents a relationship. What is x?",
+    "content_blocks": [
+      {
+        "id": "c0a80101-0000-4000-8000-000000000001",
+        "type": "text",
+        "content": "The equation below represents a relationship between $x$ and $y$."
+      },
+      {
+        "id": "c0a80101-0000-4000-8000-000000000002",
+        "type": "centered_math",
+        "content": "y = 3x^2 - 4x + 7"
+      },
+      {
+        "id": "c0a80101-0000-4000-8000-000000000003",
+        "type": "table",
+        "header": true,
+        "rows": [["$x$", "$f(x)$"], ["1", "4"], ["2", "7"]]
+      },
+      {
+        "id": "c0a80101-0000-4000-8000-000000000004",
+        "type": "text",
+        "content": "What is the value of $y$ when $x=2$?"
+      }
+    ],
+    "choices": [
+      { "label": "A", "text": "3" },
+      { "label": "B", "text": "7" },
+      { "label": "C", "text": "11" },
+      { "label": "D", "text": "15" }
+    ],
+    "correct_answer": "C",
+    "explanation": "Substitute the given value and simplify.",
+    "difficulty": "medium"
+  }]
+}`}
+        </pre>
+      </details>
+
       <form action={formAction} className="mt-4 flex flex-col gap-3">
         <label
           onDragOver={(event) => {

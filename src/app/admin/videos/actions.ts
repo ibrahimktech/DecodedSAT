@@ -128,7 +128,7 @@ export async function addVideoAction(
     if (!parsed.success) {
       return {
         status: "error",
-        message: "Pick a subtopic or a category, then check the fields.",
+        message: "Pick a skill or a category, then check the fields.",
       };
     }
 
@@ -184,7 +184,7 @@ export async function updateVideoAction(
     if (!parsed.success) {
       return {
         status: "error",
-        message: "Pick a subtopic or a category, then check the fields.",
+        message: "Pick a skill or a category, then check the fields.",
       };
     }
 

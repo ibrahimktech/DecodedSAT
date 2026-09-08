@@ -93,6 +93,10 @@ export function UploadTestQuestionsPanel({
           every question.
         </p>
         <p className="mt-2 text-sm leading-relaxed text-muted">
+          Optional <code className="rounded bg-surface px-1">content_blocks</code>{" "}
+          use the same text, centered_math, image, and table format as the question-bank importer.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
           <strong className="text-ink">Write maths as LaTeX</strong> between
           dollar signs — <code className="rounded bg-surface px-1">$x^{"{2}"}$</code>,{" "}
           <code className="rounded bg-surface px-1">
@@ -111,7 +115,7 @@ export function UploadTestQuestionsPanel({
       "external_id": "pt3-m1-01",
       "module_number": 1,
       "domain": "Algebra",
-      "subtopic": "Linear equations in one variable",
+      "subtopic": "Solving linear equations",
       "prompt": "If $5x - 3 = 17$, what is the value of $x$?",
       "choices": [
         { "label": "A", "text": "2" },

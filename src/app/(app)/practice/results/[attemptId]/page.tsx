@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { ctaClassName } from "@/components/CtaButton";
 import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
+import { MathText } from "@/components/app/MathText";
+import { QuestionContent } from "@/components/app/QuestionContent";
 import { requireUser } from "@/lib/auth/require-user";
 import { getPracticeResults } from "@/lib/learn/data";
 import { CHOICE_LETTERS, formatSeconds } from "@/lib/learn/types";
@@ -104,9 +106,12 @@ export default async function PracticeResultsPage({
                   </p>
                 </header>
 
-                <p className="mt-3 font-question text-base leading-7 text-ink">
-                  {item.prompt}
-                </p>
+                <QuestionContent
+                  legacyText={item.prompt}
+                  contentBlocks={item.contentBlocks}
+                  className="mt-3"
+                  textClassName="font-question text-base leading-7 text-ink"
+                />
 
                 <ul className="mt-3 flex flex-col gap-1.5">
                   {item.choices.map((choice, choiceIndex) => {
@@ -126,7 +131,7 @@ export default async function PracticeResultsPage({
                         <span className="font-question font-bold">
                           {CHOICE_LETTERS[choiceIndex]}
                         </span>
-                        <span>{choice}</span>
+                        <MathText text={choice} />
                         {isRight && (
                           <span className="ml-auto text-xs font-semibold text-accent">
                             correct answer
@@ -159,7 +164,7 @@ export default async function PracticeResultsPage({
                         rel="noopener noreferrer"
                         className="font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                       >
-                        Review this topic
+                        Review this skill
                       </Link>{" "}
                       with a {item.subtopicName} explainer.
                     </p>
@@ -168,9 +173,11 @@ export default async function PracticeResultsPage({
 
                 {!wasCorrect && item.explanation && (
                   <div className="mt-3 rounded-xl border border-insight-hairline bg-insight-surface p-4">
-                    <p className="font-question text-base leading-7 text-ink">
-                      {item.explanation}
-                    </p>
+                    <MathText
+                      as="p"
+                      text={item.explanation}
+                      className="font-question whitespace-pre-line text-base leading-7 text-ink"
+                    />
                   </div>
                 )}
               </li>

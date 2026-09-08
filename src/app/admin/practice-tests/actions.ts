@@ -29,8 +29,16 @@ import {
   type UploadTestPayload,
 } from "@/lib/admin/schemas";
 import { sanitizeLine, sanitizeMultiline } from "@/lib/admin/sanitize";
+import {
+  canonicalDomainImportValue,
+  canonicalSkillImportValue,
+} from "@/lib/taxonomy/math";
 import type { AdminActionResult, TestUploadState } from "@/lib/admin/types";
 import { createRateLimiter } from "@/lib/rate-limit";
+import {
+  normalizeCenteredMath,
+  type QuestionContentBlock,
+} from "@/lib/questions/content";
 
 const editLimiter = createRateLimiter({
   limit: 60,
@@ -50,14 +58,53 @@ const uploadLimiter = createRateLimiter({
  * and before the RPC. A field that sanitizes to empty is caught by the
  * database function's own guards and rejected with a reason.
  */
+function sanitizeContentBlocks(
+  blocks: QuestionContentBlock[],
+): QuestionContentBlock[] {
+  return blocks.map((block) => {
+    switch (block.type) {
+      case "text":
+        return { ...block, content: sanitizeMultiline(block.content, 8000) };
+      case "centered_math":
+        return {
+          ...block,
+          content: normalizeCenteredMath(
+            sanitizeMultiline(block.content, 4000),
+          ),
+        };
+      case "image":
+        return {
+          ...block,
+          alt: sanitizeLine(block.alt, 500),
+          caption: sanitizeLine(block.caption, 500),
+        };
+      case "table":
+        return {
+          ...block,
+          rows: block.rows.map((row) =>
+            row.map((cell) => sanitizeLine(cell, 1000)),
+          ),
+        };
+    }
+  });
+}
+
 function sanitizeTestPayload(payload: UploadTestPayload): UploadTestPayload {
   return {
-    create_new_subtopics: payload.create_new_subtopics,
+    // Accepted in legacy JSON, deliberately disabled for the fixed 19 skills.
+    create_new_subtopics: false,
     questions: payload.questions.map((question) => ({
       external_id: sanitizeLine(question.external_id, 64),
-      domain: sanitizeLine(question.domain, 100),
-      subtopic: sanitizeLine(question.subtopic, 120),
+      domain: canonicalDomainImportValue(
+        sanitizeLine(question.domain, 100),
+      ),
+      subtopic: canonicalSkillImportValue(
+        sanitizeLine(question.subtopic, 120),
+      ),
       prompt: sanitizeMultiline(question.prompt, 4000),
+      ...(question.content_blocks
+        ? { content_blocks: sanitizeContentBlocks(question.content_blocks) }
+        : {}),
       choices: question.choices.map((choice) => ({
         label: choice.label,
         text: sanitizeLine(choice.text, 1000),
@@ -310,11 +357,23 @@ export async function uploadTestQuestionsAction(
       };
     }
 
+    const sanitized = UploadTestPayloadSchema.safeParse(
+      sanitizeTestPayload(parsed.data),
+    );
+    if (!sanitized.success) {
+      const issue = sanitized.error.issues[0];
+      const where = issue.path.length > 0 ? ` at ${issue.path.join(".")}` : "";
+      return {
+        status: "error",
+        message: `The sanitized JSON is invalid${where}: ${issue.message}`,
+      };
+    }
+
     const { data, error } = await context.supabase.rpc(
       "admin_import_practice_test",
       {
         p_test_id: testId,
-        p_payload: sanitizeTestPayload(parsed.data),
+        p_payload: sanitized.data,
       },
     );
 

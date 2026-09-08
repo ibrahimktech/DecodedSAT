@@ -4,6 +4,7 @@ import { VideoCard } from "@/components/app/VideoCard";
 import { requireUser } from "@/lib/auth/require-user";
 import { getDomains, getVideoCategories, getVideos } from "@/lib/learn/data";
 import { VideoFiltersSchema } from "@/lib/learn/schemas";
+import { canonicalSkillSlug } from "@/lib/taxonomy/math";
 
 export const metadata: Metadata = {
   title: "Explainer videos",
@@ -33,6 +34,9 @@ export default async function VideosPage({
     category: typeof params.category === "string" ? params.category : undefined,
     q: typeof params.q === "string" ? params.q : undefined,
   });
+  const activeSkillSlug = filters.subtopic
+    ? canonicalSkillSlug(filters.subtopic)
+    : undefined;
 
   const [domains, categories] = await Promise.all([
     getDomains(supabase),
@@ -49,8 +53,9 @@ export default async function VideosPage({
   // selecting both would always return nothing. A domain chip wins.
   const fetched = await getVideos(supabase, {
     domainId: activeDomain?.id,
-    subtopicSlug: filters.subtopic,
-    categorySlug: activeDomain || filters.subtopic ? undefined : activeCategory?.slug,
+    subtopicSlug: activeSkillSlug,
+    categorySlug:
+      activeDomain || activeSkillSlug ? undefined : activeCategory?.slug,
   });
 
   // Title-only search, matched in process against rows RLS already released —
@@ -120,7 +125,7 @@ export default async function VideosPage({
       <nav aria-label="Filter by domain" className="mt-4 flex flex-wrap gap-2">
         <FilterChip
           href={videosHref({ q: filters.q })}
-          active={!activeDomain && !filters.subtopic && !activeCategory}
+          active={!activeDomain && !activeSkillSlug && !activeCategory}
         >
           Everything
         </FilterChip>
@@ -128,7 +133,7 @@ export default async function VideosPage({
           <FilterChip
             key={domain.id}
             href={videosHref({ domain: domain.slug, q: filters.q })}
-            active={activeDomain?.id === domain.id && !filters.subtopic}
+            active={activeDomain?.id === domain.id && !activeSkillSlug}
           >
             {domain.name}
           </FilterChip>
@@ -157,7 +162,7 @@ export default async function VideosPage({
         </nav>
       )}
 
-      {filters.subtopic && videos.length > 0 && (
+      {activeSkillSlug && videos.length > 0 && (
         <p className="mt-4 rounded-xl bg-insight-chip px-4 py-3 text-[0.9375rem] text-insight-dark">
           Showing explainers for{" "}
           <strong>{videos[0].subtopicName ?? "this topic"}</strong> —{" "}

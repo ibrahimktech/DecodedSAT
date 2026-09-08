@@ -50,6 +50,19 @@ const DESMOS_ORIGIN = "https://www.desmos.com";
 const POSTHOG_ORIGIN = "https://*.posthog.com";
 const YOUTUBE_API_ORIGIN = "https://www.youtube.com";
 
+function configuredOrigin(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+const SUPABASE_ORIGIN = configuredOrigin(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+);
+
 /**
  * React's development build calls `eval()` to reconstruct callstacks across
  * environments, and logs a warning on every page load when the CSP forbids it.
@@ -71,7 +84,7 @@ const contentSecurityPolicy = [
   "default-src 'self'",
   `script-src ${scriptSrc}`,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: ${YOUTUBE_THUMBNAIL_ORIGIN}`,
+  `img-src 'self' data: ${YOUTUBE_THUMBNAIL_ORIGIN}${SUPABASE_ORIGIN ? ` ${SUPABASE_ORIGIN}` : ""}`,
   // `data:` covers inline font payloads in bundled stylesheets. No third-party
   // font origin is permitted.
   "font-src 'self' data:",

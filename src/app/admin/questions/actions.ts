@@ -17,6 +17,9 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { randomUUID } from "node:crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { z } from "zod";
 import { getAdminActionContext } from "@/lib/auth/admin";
 import { describeError } from "@/lib/auth/describe-error";
 import { GENERIC_ERROR_MESSAGE, rateLimitedMessage } from "@/lib/auth/state";
@@ -32,9 +35,24 @@ import { sanitizeLine, sanitizeMultiline } from "@/lib/admin/sanitize";
 import type {
   AdminActionResult,
   CreateQuestionResult,
+  QuestionAssetActionResult,
   UploadState,
 } from "@/lib/admin/types";
 import { createRateLimiter } from "@/lib/rate-limit";
+import {
+  QUESTION_ASSET_BUCKET,
+  QUESTION_ASSET_MAX_BYTES,
+  QuestionContentBlocksSchema,
+  contentBlocksToLegacyPrompt,
+  normalizeCenteredMath,
+  parseQuestionContentBlocks,
+  questionContentAssetPaths,
+  type QuestionContentBlock,
+} from "@/lib/questions/content";
+import {
+  canonicalDomainImportValue,
+  canonicalSkillImportValue,
+} from "@/lib/taxonomy/math";
 
 /**
  * Keyed on user id (CLAUDE.md: by user once auth exists). Uploads are heavy
@@ -57,6 +75,58 @@ const createLimiter = createRateLimiter({
   windowMs: 60_000,
   prefix: "admin-create-question",
 });
+
+const assetLimiter = createRateLimiter({
+  limit: 40,
+  windowMs: 10 * 60_000,
+  prefix: "admin-question-asset",
+});
+
+function sanitizeContentBlocks(
+  blocks: QuestionContentBlock[],
+): QuestionContentBlock[] {
+  return blocks.map((block) => {
+    switch (block.type) {
+      case "text":
+        return {
+          ...block,
+          content: sanitizeMultiline(block.content, 8000),
+        };
+      case "centered_math":
+        return {
+          ...block,
+          content: normalizeCenteredMath(
+            sanitizeMultiline(block.content, 4000),
+          ),
+        };
+      case "image":
+        return {
+          ...block,
+          alt: sanitizeLine(block.alt, 500),
+          caption: sanitizeLine(block.caption, 500),
+        };
+      case "table":
+        return {
+          ...block,
+          rows: block.rows.map((row) =>
+            row.map((cell) => sanitizeLine(cell, 1000)),
+          ),
+        };
+    }
+  });
+}
+
+function prepareContentBlocks(
+  value: QuestionContentBlock[] | null | undefined,
+): { blocks: QuestionContentBlock[] | null; error?: string } {
+  if (value === null || value === undefined) return { blocks: null };
+  const sanitized = sanitizeContentBlocks(value);
+  const parsed = QuestionContentBlocksSchema.safeParse(sanitized);
+  if (!parsed.success) {
+    return { blocks: null, error: parsed.error.issues[0]?.message };
+  }
+  return { blocks: parsed.data };
+}
 
 function questionFieldErrors(
   issues: Array<{ path: PropertyKey[]; message: string }>,
@@ -81,20 +151,32 @@ function sanitizePayload(payload: UploadPayload): UploadPayload {
       payload.set_description === undefined
         ? undefined
         : sanitizeLine(payload.set_description, 500),
-    create_new_subtopics: payload.create_new_subtopics,
-    questions: payload.questions.map((question) => ({
-      external_id: sanitizeLine(question.external_id, 64),
-      domain: sanitizeLine(question.domain, 100),
-      subtopic: sanitizeLine(question.subtopic, 120),
-      prompt: sanitizeMultiline(question.prompt, 4000),
-      choices: question.choices.map((choice) => ({
-        label: choice.label,
-        text: sanitizeLine(choice.text, 1000),
-      })),
-      correct_answer: question.correct_answer,
-      explanation: sanitizeMultiline(question.explanation, 4000),
-      difficulty: question.difficulty,
-    })),
+    // The SAT taxonomy is fixed. The legacy property remains accepted so old
+    // JSON files keep their shape, but an import cannot create a 20th skill.
+    create_new_subtopics: false,
+    questions: payload.questions.map((question) => {
+      const contentBlocks = question.content_blocks
+        ? sanitizeContentBlocks(question.content_blocks)
+        : undefined;
+      return {
+        external_id: sanitizeLine(question.external_id, 64),
+        domain: canonicalDomainImportValue(
+          sanitizeLine(question.domain, 100),
+        ),
+        subtopic: canonicalSkillImportValue(
+          sanitizeLine(question.subtopic, 120),
+        ),
+        prompt: sanitizeMultiline(question.prompt, 4000),
+        ...(contentBlocks ? { content_blocks: contentBlocks } : {}),
+        choices: question.choices.map((choice) => ({
+          label: choice.label,
+          text: sanitizeLine(choice.text, 1000),
+        })),
+        correct_answer: question.correct_answer,
+        explanation: sanitizeMultiline(question.explanation, 4000),
+        difficulty: question.difficulty,
+      };
+    }),
   };
 }
 
@@ -144,9 +226,19 @@ export async function uploadQuestionSetAction(
       };
     }
 
+    const sanitized = UploadPayloadSchema.safeParse(sanitizePayload(parsed.data));
+    if (!sanitized.success) {
+      const issue = sanitized.error.issues[0];
+      const where = issue.path.length > 0 ? ` at ${issue.path.join(".")}` : "";
+      return {
+        status: "error",
+        message: `The sanitized JSON is invalid${where}: ${issue.message}`,
+      };
+    }
+
     const { data, error } = await context.supabase.rpc(
       "admin_import_question_set",
-      { p_payload: sanitizePayload(parsed.data) },
+      { p_payload: sanitized.data },
     );
 
     if (error) {
@@ -213,10 +305,24 @@ export async function createQuestionAction(
       };
     }
 
+    const preparedContent = prepareContentBlocks(parsed.data.contentBlocks);
+    if (preparedContent.error) {
+      return {
+        status: "error",
+        message: "Check the highlighted fields and try again.",
+        fieldErrors: { contentBlocks: preparedContent.error },
+      };
+    }
+
     const choices = parsed.data.choices.map((choice) =>
       sanitizeLine(choice, 1000),
     );
-    const prompt = sanitizeMultiline(parsed.data.prompt, 4000);
+    const prompt = sanitizeMultiline(
+      preparedContent.blocks
+        ? contentBlocksToLegacyPrompt(preparedContent.blocks)
+        : parsed.data.prompt,
+      4000,
+    );
     const explanation = sanitizeMultiline(parsed.data.explanation, 4000);
     const externalId = sanitizeLine(parsed.data.externalId, 64);
 
@@ -244,6 +350,7 @@ export async function createQuestionAction(
       .from("subtopics")
       .select("id")
       .eq("id", parsed.data.subtopicId)
+      .eq("active", true)
       .maybeSingle();
     if (subtopicError) {
       console.error(
@@ -255,7 +362,7 @@ export async function createQuestionAction(
       return {
         status: "error",
         message: "Check the highlighted fields and try again.",
-        fieldErrors: { subtopicId: "Choose an existing skill / subtopic." },
+        fieldErrors: { subtopicId: "Choose an existing skill." },
       };
     }
 
@@ -304,11 +411,14 @@ export async function createQuestionAction(
       }
     }
 
+    const questionId = parsed.data.id ?? randomUUID();
     const { data, error } = await context.supabase.rpc(
       "admin_create_question",
       {
+        p_question_id: questionId,
         p_subtopic_id: parsed.data.subtopicId,
         p_prompt: prompt,
+        p_content_blocks: preparedContent.blocks,
         p_choices: choices,
         p_correct_choice: parsed.data.correctChoice,
         p_explanation: explanation,
@@ -337,7 +447,7 @@ export async function createQuestionAction(
         return {
           status: "error",
           message: "Check the highlighted fields and try again.",
-          fieldErrors: { subtopicId: "Choose an existing skill / subtopic." },
+          fieldErrors: { subtopicId: "Choose an existing skill." },
         };
       }
       if (error.message.includes("unknown_question_set")) {
@@ -406,11 +516,37 @@ export async function updateQuestionAction(
       return { status: "error", message: "Check the fields and try again." };
     }
 
+    const preparedContent = prepareContentBlocks(parsed.data.contentBlocks);
+    if (preparedContent.error) {
+      return { status: "error", message: preparedContent.error };
+    }
+
     const choices = parsed.data.choices.map((text) => sanitizeLine(text, 1000));
-    const prompt = sanitizeMultiline(parsed.data.prompt, 4000);
+    const prompt = sanitizeMultiline(
+      preparedContent.blocks
+        ? contentBlocksToLegacyPrompt(preparedContent.blocks)
+        : parsed.data.prompt,
+      4000,
+    );
     const explanation = sanitizeMultiline(parsed.data.explanation, 4000);
     if (prompt === "" || explanation === "" || choices.some((c) => c === "")) {
       return { status: "error", message: "Check the fields and try again." };
+    }
+
+    const { data: skill, error: skillError } = await context.supabase
+      .from("subtopics")
+      .select("id")
+      .eq("id", parsed.data.subtopicId)
+      .eq("active", true)
+      .maybeSingle();
+    if (skillError) {
+      console.error(
+        `[admin] update question skill lookup failed: ${skillError.message}`,
+      );
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
+    if (!skill) {
+      return { status: "error", message: "Choose an active skill." };
     }
 
     if (parsed.data.solutionVideoId) {
@@ -433,6 +569,18 @@ export async function updateQuestionAction(
       }
     }
 
+    const { data: existing, error: existingError } = await context.supabase
+      .from("questions")
+      .select("content_blocks")
+      .eq("id", parsed.data.id)
+      .maybeSingle();
+    if (existingError) {
+      console.error(
+        `[admin] question content lookup failed: ${existingError.message}`,
+      );
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
+
     // The admin's own session; RLS's update policy re-checks is_admin() and
     // the answer key columns are writable only through this grant.
     const { error, count } = await context.supabase
@@ -441,6 +589,9 @@ export async function updateQuestionAction(
         {
           subtopic_id: parsed.data.subtopicId,
           prompt,
+          ...(parsed.data.contentBlocks !== undefined
+            ? { content_blocks: preparedContent.blocks }
+            : {}),
           choices,
           correct_choice: parsed.data.correctChoice,
           explanation,
@@ -463,10 +614,242 @@ export async function updateQuestionAction(
       return { status: "error", message: GENERIC_ERROR_MESSAGE };
     }
 
+    const { error: reviewError } = await context.supabase.rpc(
+      "admin_resolve_question_skill_review",
+      {
+        p_question_id: parsed.data.id,
+        p_subtopic_id: parsed.data.subtopicId,
+      },
+    );
+    if (reviewError) {
+      console.error(
+        `[admin] question skill review update failed: ${reviewError.message}`,
+      );
+    }
+
+    if (parsed.data.contentBlocks !== undefined) {
+      const oldPaths = questionContentAssetPaths(
+        parseQuestionContentBlocks(existing?.content_blocks),
+      );
+      const nextPaths = new Set(questionContentAssetPaths(preparedContent.blocks));
+      await removeUnreferencedAssets(
+        context.supabase,
+        parsed.data.id,
+        oldPaths.filter((path) => !nextPaths.has(path)),
+      );
+    }
+
     revalidatePath("/admin/questions");
     return { status: "ok" };
   } catch (error) {
     console.error(`[admin] question update threw: ${describeError(error)}`);
+    return { status: "error", message: GENERIC_ERROR_MESSAGE };
+  }
+}
+
+const ResolveQuestionSkillReviewSchema = z.object({
+  questionId: z.uuid(),
+  skillId: z.uuid(),
+});
+
+export async function resolveQuestionSkillReviewAction(
+  input: unknown,
+): Promise<AdminActionResult> {
+  try {
+    const context = await getAdminActionContext();
+    if (!context) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+
+    const parsed = ResolveQuestionSkillReviewSchema.safeParse(input);
+    if (!parsed.success) {
+      return { status: "error", message: "Choose an active skill." };
+    }
+
+    const { data, error } = await context.supabase.rpc(
+      "admin_resolve_question_skill_review",
+      {
+        p_question_id: parsed.data.questionId,
+        p_subtopic_id: parsed.data.skillId,
+      },
+    );
+    if (error || data !== true) {
+      if (error) {
+        console.error(`[admin] resolve skill review failed: ${error.message}`);
+      }
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
+
+    revalidatePath("/admin/questions");
+    revalidatePath("/questions");
+    return { status: "ok" };
+  } catch (error) {
+    console.error(
+      `[admin] resolve skill review threw: ${describeError(error)}`,
+    );
+    return { status: "error", message: GENERIC_ERROR_MESSAGE };
+  }
+}
+
+const DeleteQuestionAssetSchema = z.object({
+  questionId: z.uuid(),
+  storagePath: z.string().max(300),
+});
+
+function isQuestionAssetPath(questionId: string, storagePath: string): boolean {
+  return new RegExp(
+    `^questions/${questionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/[0-9a-f-]{36}\\.(png|jpg|webp)$`,
+    "i",
+  ).test(storagePath);
+}
+
+function detectImageType(
+  bytes: Uint8Array,
+  file: File,
+): { extension: "png" | "jpg" | "webp"; contentType: string } | null {
+  const name = file.name.toLowerCase();
+  if (
+    file.type === "image/png" &&
+    name.endsWith(".png") &&
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return { extension: "png", contentType: "image/png" };
+  }
+  if (
+    file.type === "image/jpeg" &&
+    (name.endsWith(".jpg") || name.endsWith(".jpeg")) &&
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return { extension: "jpg", contentType: "image/jpeg" };
+  }
+  if (
+    file.type === "image/webp" &&
+    name.endsWith(".webp") &&
+    bytes.length >= 12 &&
+    String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+    String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
+  ) {
+    return { extension: "webp", contentType: "image/webp" };
+  }
+  return null;
+}
+
+export async function uploadQuestionAssetAction(
+  formData: FormData,
+): Promise<QuestionAssetActionResult> {
+  try {
+    const context = await getAdminActionContext();
+    if (!context) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+
+    const rate = await assetLimiter.check(context.user.id);
+    if (!rate.ok) {
+      return {
+        status: "rate_limited",
+        message: rateLimitedMessage(rate.retryAfterSeconds),
+      };
+    }
+
+    const questionId = formData.get("questionId");
+    const file = formData.get("file");
+    if (!z.uuid().safeParse(questionId).success) {
+      return { status: "error", message: "The question draft is invalid." };
+    }
+    if (!(file instanceof File) || file.size === 0) {
+      return { status: "error", message: "Choose an image to upload." };
+    }
+    if (file.size > QUESTION_ASSET_MAX_BYTES) {
+      return { status: "error", message: "Images must be 5 MB or smaller." };
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const detected = detectImageType(bytes, file);
+    if (!detected) {
+      return {
+        status: "error",
+        message: "Use a genuine PNG, JPG/JPEG, or WebP image.",
+      };
+    }
+
+    const storagePath = `questions/${questionId}/${randomUUID()}.${detected.extension}`;
+    const { error } = await context.supabase.storage
+      .from(QUESTION_ASSET_BUCKET)
+      .upload(storagePath, bytes, {
+        contentType: detected.contentType,
+        cacheControl: "31536000",
+        upsert: false,
+      });
+    if (error) {
+      console.error(`[admin] question asset upload failed: ${error.message}`);
+      return { status: "error", message: "The image could not be uploaded." };
+    }
+    return { status: "ok", storagePath };
+  } catch (error) {
+    console.error(`[admin] question asset upload threw: ${describeError(error)}`);
+    return { status: "error", message: GENERIC_ERROR_MESSAGE };
+  }
+}
+
+async function removeUnreferencedAssets(
+  supabase: SupabaseClient,
+  questionId: string,
+  storagePaths: string[],
+): Promise<void> {
+  for (const storagePath of [...new Set(storagePaths)]) {
+    if (!isQuestionAssetPath(questionId, storagePath)) continue;
+    const { data, error } = await supabase.rpc(
+      "admin_question_asset_reference_count",
+      {
+        p_storage_path: storagePath,
+        p_exclude_question_id: null,
+      },
+    );
+    if (error) {
+      console.error(`[admin] asset reference check failed: ${error.message}`);
+      continue;
+    }
+    if (Number(data) !== 0) continue;
+    const { error: removeError } = await supabase.storage
+      .from(QUESTION_ASSET_BUCKET)
+      .remove([storagePath]);
+    if (removeError) {
+      console.error(`[admin] question asset cleanup failed: ${removeError.message}`);
+    }
+  }
+}
+
+export async function deleteQuestionAssetAction(
+  input: unknown,
+): Promise<AdminActionResult> {
+  try {
+    const context = await getAdminActionContext();
+    if (!context) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    const parsed = DeleteQuestionAssetSchema.safeParse(input);
+    if (
+      !parsed.success ||
+      !isQuestionAssetPath(
+        parsed.data.questionId,
+        parsed.data.storagePath,
+      )
+    ) {
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
+    await removeUnreferencedAssets(
+      context.supabase,
+      parsed.data.questionId,
+      [parsed.data.storagePath],
+    );
+    return { status: "ok" };
+  } catch (error) {
+    console.error(`[admin] question asset delete threw: ${describeError(error)}`);
     return { status: "error", message: GENERIC_ERROR_MESSAGE };
   }
 }

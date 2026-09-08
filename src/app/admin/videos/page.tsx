@@ -93,13 +93,13 @@ export default async function AdminVideosPage({
           </label>
 
           <label className="flex flex-col gap-1 text-sm font-medium text-muted">
-            Subtopic
+            Skill
             <select
               name="subtopic"
               defaultValue={filters.subtopic ?? ""}
               className="rounded-xl border border-hairline bg-surface px-3 py-2 text-[0.9375rem] text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
             >
-              <option value="">All subtopics</option>
+              <option value="">All skills</option>
               {domains.map((domain) => (
                 <optgroup key={domain.id} label={domain.name}>
                   {subtopics

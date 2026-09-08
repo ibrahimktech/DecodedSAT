@@ -187,8 +187,8 @@ export function TopicPicker({
           Question bank
         </h1>
         <p className="mt-2 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">
-          Pick as many topics as you like — a whole domain, or three subtopics
-          across two of them. Every question you choose is in the set; nothing
+          Pick as many skills as you like — a whole domain, or individual skills
+          across domains. Every question you choose is in the set; nothing
           cuts you off at ten.
         </p>
       </header>
@@ -240,7 +240,7 @@ export function TopicPicker({
           <p className="mt-1 text-[0.9375rem] text-muted">
             {everythingCount.toLocaleString()}{" "}
             {everythingCount === 1 ? "question" : "questions"} across{" "}
-            {progress.length} topics.
+            {progress.length} skills.
           </p>
         </div>
         <button
@@ -253,12 +253,12 @@ export function TopicPicker({
         </button>
       </section>
 
-      {/* The topic table. */}
+      {/* The skill table. */}
       <section className="mt-8">
         <div className="flex items-center gap-4 border-b border-hairline pb-2 text-sm font-semibold text-muted">
-          <span className="flex-1">Topic</span>
-          <span className="w-40 text-right sm:w-56">Progress</span>
-          <span className="w-16 text-right">Accuracy</span>
+          <span className="min-w-0 flex-1">Skill</span>
+          <span className="w-16 text-right sm:w-56">Progress</span>
+          <span className="w-12 text-right sm:w-16">Accuracy</span>
         </div>
 
         {groups.map((group) => {
@@ -288,7 +288,7 @@ export function TopicPicker({
                   return (
                     <li key={entry.subtopic.id}>
                       <label
-                        className={`flex cursor-pointer items-center gap-4 rounded-xl px-2 py-2.5 transition-colors ${
+                        className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-xl px-2 py-2.5 transition-colors sm:gap-4 ${
                           isSelected ? "bg-accent-chip" : "hover:bg-surface"
                         }`}
                       >
@@ -298,11 +298,11 @@ export function TopicPicker({
                           onChange={() => toggleSubtopic(entry.subtopic.slug)}
                           className="h-4 w-4 shrink-0 accent-accent"
                         />
-                        <span className="flex-1 text-[0.9375rem] text-ink">
+                        <span className="min-w-0 flex-1 break-words text-[0.9375rem] leading-snug text-ink">
                           {entry.subtopic.name}
                         </span>
 
-                        <span className="flex w-40 items-center justify-end gap-2 sm:w-56">
+                        <span className="flex w-16 shrink-0 items-center justify-end gap-2 sm:w-56">
                           <ProgressBar
                             answered={counts.answered}
                             total={counts.total}
@@ -312,7 +312,7 @@ export function TopicPicker({
                           </span>
                         </span>
 
-                        <span className="w-16 text-right text-sm font-semibold tabular-nums">
+                        <span className="w-12 shrink-0 text-right text-sm font-semibold tabular-nums sm:w-16">
                           {entry.accuracy === null ? (
                             <span className="text-muted">—</span>
                           ) : (
@@ -337,7 +337,7 @@ export function TopicPicker({
           <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <p className="text-[0.9375rem] text-muted">
               <strong className="text-ink">
-                {selected.size} {selected.size === 1 ? "topic" : "topics"}
+                {selected.size} {selected.size === 1 ? "skill" : "skills"}
               </strong>{" "}
               · {selectedQuestionCount.toLocaleString()}{" "}
               {selectedQuestionCount === 1 ? "question" : "questions"}

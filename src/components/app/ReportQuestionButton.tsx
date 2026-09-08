@@ -11,16 +11,19 @@ import {
 } from "react";
 import { submitQuestionReportAction } from "@/app/question-reports/actions";
 import { MathText } from "@/components/app/MathText";
+import { QuestionContent } from "@/components/app/QuestionContent";
 import { examButtonClassName } from "@/components/app/exam/ExamShell";
 import {
   CHOICE_LETTERS,
   QUESTION_REPORT_REASON_LABELS,
   type QuestionReportReason,
 } from "@/lib/learn/types";
+import type { QuestionContentBlock } from "@/lib/questions/content";
 
 export type ReportableQuestion = {
   id: string;
   prompt: string;
+  contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
 };
 
@@ -99,6 +102,9 @@ export function ReportQuestionButton({
     setReportedQuestion({
       id: question.id,
       prompt: question.prompt,
+      contentBlocks: question.contentBlocks
+        ? structuredClone(question.contentBlocks)
+        : null,
       choices: [...question.choices],
     });
     setReportedLabel(questionLabel);
@@ -297,10 +303,10 @@ export function ReportQuestionButton({
                   aria-label="Question preview"
                   className="mt-5 max-h-56 overflow-y-auto rounded-xl border border-hairline bg-background p-4"
                 >
-                  <MathText
-                    as="p"
-                    text={reportedQuestion.prompt}
-                    className="font-question whitespace-pre-line text-base leading-7 text-ink"
+                  <QuestionContent
+                    legacyText={reportedQuestion.prompt}
+                    contentBlocks={reportedQuestion.contentBlocks}
+                    textClassName="font-question text-base leading-7 text-ink"
                   />
                   <ol className="mt-3 flex flex-col gap-1.5">
                     {reportedQuestion.choices.map((choice, index) => (

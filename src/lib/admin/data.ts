@@ -17,6 +17,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describeError } from "@/lib/auth/describe-error";
 import type { Difficulty } from "@/lib/learn/types";
+import { parseQuestionContentBlocks } from "@/lib/questions/content";
 import type {
   AdminPracticeTest,
   AdminQuestion,
@@ -125,10 +126,12 @@ export async function listAdminQuestions(
   let query = supabase
     .from("admin_questions")
     .select(
-      "id, prompt, choices, correct_choice, explanation, difficulty, " +
+      "id, prompt, content_blocks, choices, correct_choice, explanation, difficulty, " +
         "is_active, external_id, subtopic_id, subtopic_name, domain_id, " +
         "domain_name, question_set_id, set_name, solution_video_id, " +
-        "solution_video_title, solution_video_is_active",
+        "solution_video_title, solution_video_is_active, subtopic_active, " +
+        "skill_review_confidence, skill_review_reason, skill_review_status, " +
+        "old_subtopic_name, suggested_subtopic_id",
     )
     .order("domain_name")
     .order("subtopic_name")
@@ -147,6 +150,11 @@ export async function listAdminQuestions(
   }
   if (filters.set) query = query.eq("question_set_id", filters.set);
   if (filters.difficulty) query = query.eq("difficulty", filters.difficulty);
+  if (filters.review === "needs-review") {
+    query = query.eq("skill_review_status", "pending");
+  } else if (filters.review === "uncategorized") {
+    query = query.eq("subtopic_active", false);
+  }
   if (filters.q) {
     query = query.ilike("prompt", `%${escapeLikePattern(filters.q)}%`);
   }
@@ -160,6 +168,7 @@ export async function listAdminQuestions(
   return ((data ?? []) as unknown as Array<{
     id: string;
     prompt: string;
+    content_blocks: unknown;
     choices: unknown;
     correct_choice: number;
     explanation: string;
@@ -174,10 +183,16 @@ export async function listAdminQuestions(
     solution_video_id: string | null;
     solution_video_title: string | null;
     solution_video_is_active: boolean | null;
+    skill_review_confidence: "HIGH" | "MEDIUM" | "LOW" | null;
+    skill_review_reason: string | null;
+    skill_review_status: "applied" | "pending" | "accepted" | "changed" | null;
+    old_subtopic_name: string | null;
+    suggested_subtopic_id: string | null;
   }>)
     .map((row) => ({
       id: row.id,
       prompt: row.prompt,
+      contentBlocks: parseQuestionContentBlocks(row.content_blocks),
       choices: toChoices(row.choices),
       correctChoice: row.correct_choice,
       explanation: row.explanation,
@@ -195,6 +210,19 @@ export async function listAdminQuestions(
               id: row.solution_video_id,
               title: row.solution_video_title,
               isActive: row.solution_video_is_active ?? false,
+            }
+          : null,
+      skillReview:
+        row.skill_review_confidence &&
+        row.skill_review_reason &&
+        row.skill_review_status &&
+        row.old_subtopic_name
+          ? {
+              confidence: row.skill_review_confidence,
+              reason: row.skill_review_reason,
+              status: row.skill_review_status,
+              oldSkillName: row.old_subtopic_name,
+              suggestedSkillId: row.suggested_subtopic_id,
             }
           : null,
     }))
@@ -292,7 +320,7 @@ export async function getAdminQuestionReport(
       REPORT_SUMMARY_COLUMNS +
         ", user_id, updated_at, admin_note, reviewed_at, reviewed_by, " +
         "reviewer_name, question_snapshot, current_choices, " +
-        "current_correct_choice, current_explanation, current_difficulty, " +
+        "current_correct_choice, current_explanation, current_difficulty, current_content_blocks, " +
         "subtopic_id, subtopic_name, domain_id, domain_name, set_name",
     )
     .eq("id", reportId)
@@ -313,6 +341,7 @@ export async function getAdminQuestionReport(
     reviewer_name: string | null;
     question_snapshot: {
       prompt?: unknown;
+      content_blocks?: unknown;
       choices?: unknown;
       correct_choice?: unknown;
     };
@@ -320,6 +349,7 @@ export async function getAdminQuestionReport(
     current_correct_choice: number;
     current_explanation: string;
     current_difficulty: Difficulty;
+    current_content_blocks: unknown;
     subtopic_id: string;
     subtopic_name: string;
     domain_id: string;
@@ -342,7 +372,9 @@ export async function getAdminQuestionReport(
   const { data: solutionLink, error: solutionLinkError } = await supabase
     .from("admin_questions")
     .select(
-      "solution_video_id, solution_video_title, solution_video_is_active",
+      "solution_video_id, solution_video_title, solution_video_is_active, " +
+        "skill_review_confidence, skill_review_reason, skill_review_status, " +
+        "old_subtopic_name, suggested_subtopic_id",
     )
     .eq("id", row.question_id)
     .maybeSingle();
@@ -353,6 +385,11 @@ export async function getAdminQuestionReport(
     solution_video_id: string | null;
     solution_video_title: string | null;
     solution_video_is_active: boolean | null;
+    skill_review_confidence: "HIGH" | "MEDIUM" | "LOW" | null;
+    skill_review_reason: string | null;
+    skill_review_status: "applied" | "pending" | "accepted" | "changed" | null;
+    old_subtopic_name: string | null;
+    suggested_subtopic_id: string | null;
   } | null;
 
   return {
@@ -365,12 +402,16 @@ export async function getAdminQuestionReport(
     reviewerName: row.reviewer_name,
     snapshot: {
       prompt: row.question_snapshot.prompt,
+      contentBlocks: parseQuestionContentBlocks(
+        row.question_snapshot.content_blocks,
+      ),
       choices: snapshotChoices,
       correctChoice: Number(row.question_snapshot.correct_choice),
     },
     currentQuestion: {
       id: row.question_id,
       prompt: row.current_prompt,
+      contentBlocks: parseQuestionContentBlocks(row.current_content_blocks),
       choices: currentChoices,
       correctChoice: row.current_correct_choice,
       explanation: row.current_explanation,
@@ -388,6 +429,19 @@ export async function getAdminQuestionReport(
               id: linkedVideo.solution_video_id,
               title: linkedVideo.solution_video_title,
               isActive: linkedVideo.solution_video_is_active ?? false,
+            }
+          : null,
+      skillReview:
+        linkedVideo?.skill_review_confidence &&
+        linkedVideo.skill_review_reason &&
+        linkedVideo.skill_review_status &&
+        linkedVideo.old_subtopic_name
+          ? {
+              confidence: linkedVideo.skill_review_confidence,
+              reason: linkedVideo.skill_review_reason,
+              status: linkedVideo.skill_review_status,
+              oldSkillName: linkedVideo.old_subtopic_name,
+              suggestedSkillId: linkedVideo.suggested_subtopic_id,
             }
           : null,
     },

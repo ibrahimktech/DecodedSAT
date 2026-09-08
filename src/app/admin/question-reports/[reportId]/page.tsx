@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { MathText } from "@/components/app/MathText";
+import { QuestionContent as QuestionBody } from "@/components/app/QuestionContent";
 import { QuestionReportReviewActions } from "@/components/admin/QuestionReportReviewActions";
 import { QuestionReportStatusBadge } from "@/components/admin/QuestionReportStatusBadge";
 import {
@@ -48,6 +49,8 @@ export default async function QuestionReportDetailPage({
   });
   const questionChanged =
     report.snapshot.prompt !== report.currentQuestion.prompt ||
+    JSON.stringify(report.snapshot.contentBlocks) !==
+      JSON.stringify(report.currentQuestion.contentBlocks) ||
     report.snapshot.correctChoice !== report.currentQuestion.correctChoice ||
     JSON.stringify(report.snapshot.choices) !==
       JSON.stringify(report.currentQuestion.choices);
@@ -145,6 +148,7 @@ export default async function QuestionReportDetailPage({
 
             <QuestionContent
               prompt={report.currentQuestion.prompt}
+              contentBlocks={report.currentQuestion.contentBlocks}
               choices={report.currentQuestion.choices}
               correctChoice={report.currentQuestion.correctChoice}
               explanation={report.currentQuestion.explanation}
@@ -180,6 +184,7 @@ export default async function QuestionReportDetailPage({
             </p>
             <QuestionContent
               prompt={report.snapshot.prompt}
+              contentBlocks={report.snapshot.contentBlocks}
               choices={report.snapshot.choices}
               correctChoice={report.snapshot.correctChoice}
             />
@@ -214,21 +219,23 @@ export default async function QuestionReportDetailPage({
 
 function QuestionContent({
   prompt,
+  contentBlocks,
   choices,
   correctChoice,
   explanation,
 }: {
   prompt: string;
+  contentBlocks: import("@/lib/questions/content").QuestionContentBlock[] | null;
   choices: string[];
   correctChoice: number;
   explanation?: string;
 }) {
   return (
     <div className="mt-5">
-      <MathText
-        as="p"
-        text={prompt}
-        className="whitespace-pre-line text-[0.9375rem] leading-relaxed text-ink"
+      <QuestionBody
+        legacyText={prompt}
+        contentBlocks={contentBlocks}
+        textClassName="font-question text-[0.9375rem] leading-relaxed text-ink"
       />
       <ol className="mt-4 flex flex-col gap-2">
         {choices.map((choice, index) => (

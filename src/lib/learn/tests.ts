@@ -24,6 +24,10 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describeError } from "@/lib/auth/describe-error";
 import type { Difficulty, PracticeQuestion, SolutionVideo } from "./types";
+import {
+  parseQuestionContentBlocks,
+  type QuestionContentBlock,
+} from "@/lib/questions/content";
 
 function logQueryError(label: string, error: unknown): void {
   console.error(`[tests] ${label} failed: ${describeError(error)}`);
@@ -345,7 +349,7 @@ export async function getRunnerState(
   const [questionsResult, responsesResult] = await Promise.all([
     supabase
       .from("practice_test_questions")
-      .select("order_index, questions!inner(id, prompt, choices)")
+      .select("order_index, questions!inner(id, prompt, content_blocks, choices)")
       .eq("practice_test_id", row.practice_test_id)
       .eq("module_number", moduleNumber)
       .order("order_index"),
@@ -365,11 +369,17 @@ export async function getRunnerState(
   }
 
   const questions = ((questionsResult.data ?? []) as unknown as Array<{
-    questions: { id: string; prompt: string; choices: unknown };
+    questions: {
+      id: string;
+      prompt: string;
+      content_blocks: unknown;
+      choices: unknown;
+    };
   }>)
     .map((entry) => ({
       id: entry.questions.id,
       prompt: entry.questions.prompt,
+      contentBlocks: parseQuestionContentBlocks(entry.questions.content_blocks),
       choices: toChoices(entry.questions.choices),
     }))
     .filter((question) => question.choices.length === 4);
@@ -409,6 +419,7 @@ export type TestReviewItem = {
   moduleNumber: number;
   position: number;
   prompt: string;
+  contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
   selectedChoice: number | null;
   isCorrect: boolean | null;
@@ -478,7 +489,7 @@ export async function getPracticeTestReview(
     supabase
       .from("practice_test_questions")
       .select(
-        "module_number, order_index, questions!inner(id, prompt, choices, subtopics!inner(id, name, slug))",
+        "module_number, order_index, questions!inner(id, prompt, content_blocks, choices, subtopics!inner(id, name, slug))",
       )
       .eq("practice_test_id", row.practice_test_id)
       .order("module_number")
@@ -503,6 +514,7 @@ export async function getPracticeTestReview(
     questions: {
       id: string;
       prompt: string;
+      content_blocks: unknown;
       choices: unknown;
       subtopics: { id: string; name: string; slug: string };
     };
@@ -595,6 +607,9 @@ export async function getPracticeTestReview(
         moduleNumber: entry.module_number,
         position: entry.order_index,
         prompt: entry.questions.prompt,
+        contentBlocks: parseQuestionContentBlocks(
+          entry.questions.content_blocks,
+        ),
         choices: toChoices(entry.questions.choices),
         selectedChoice: response?.selected ?? null,
         // A question never answered has no response row at all — that is

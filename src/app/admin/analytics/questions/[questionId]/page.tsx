@@ -9,9 +9,10 @@ import {
   formatNumber,
   formatPercent,
 } from "@/components/admin/analytics/AnalyticsUi";
-import { MathText } from "@/components/app/MathText";
+import { QuestionContent } from "@/components/app/QuestionContent";
 import { getAnalyticsQuestion, resolveAnalyticsRange } from "@/lib/analytics/admin-data";
 import { requireAdmin } from "@/lib/auth/admin";
+import { parseQuestionContentBlocks } from "@/lib/questions/content";
 
 export const metadata: Metadata = { title: "Question analytics" };
 
@@ -21,6 +22,12 @@ export default async function AnalyticsQuestionPage({ params }: { params: Promis
   if (!parsed.success) notFound();
   const data = await getAnalyticsQuestion(supabase, resolveAnalyticsRange({ range: "all" }), parsed.data);
   if (!data) notFound();
+
+  const { data: richQuestion } = await supabase
+    .from("admin_questions")
+    .select("content_blocks")
+    .eq("id", parsed.data)
+    .maybeSingle();
 
   const question = data.question as Record<string, unknown>;
   const metrics = data.metrics as Record<string, unknown>;
@@ -35,7 +42,7 @@ export default async function AnalyticsQuestionPage({ params }: { params: Promis
         <Link href="/admin/questions" className="text-sm font-semibold text-muted hover:text-accent">Open question manager →</Link>
       </div>
       <header className="mt-5"><h1 className="font-display text-3xl font-extrabold text-ink">Question {String(question.id).slice(0, 8)}</h1><p className="mt-1 text-sm capitalize text-muted">{String(question.domain)} · {String(question.subtopic)} · {String(question.difficulty)}</p></header>
-      <section className="mt-6 rounded-2xl border border-hairline bg-surface p-5"><MathText as="p" text={String(question.prompt)} className="font-question text-lg leading-7 text-ink" /></section>
+      <section className="mt-6 rounded-2xl border border-hairline bg-surface p-5"><QuestionContent legacyText={String(question.prompt)} contentBlocks={parseQuestionContentBlocks(richQuestion?.content_blocks)} /></section>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Views" value={formatNumber(metrics.views)} /><MetricCard label="Attempts" value={formatNumber(metrics.attempts)} /><MetricCard label="Correct" value={formatNumber(metrics.correct)} /><MetricCard label="Incorrect" value={formatNumber(metrics.incorrect)} /><MetricCard label="Accuracy" value={formatPercent(metrics.accuracy)} /><MetricCard label="Average solve time" value={formatDuration(Number(metrics.averageAnswerTimeMs) / 1000)} /><MetricCard label="Median solve time" value={formatDuration(Number(metrics.medianAnswerTimeMs) / 1000)} /><MetricCard label="Skip rate" value={formatPercent(metrics.skipRate)} title="Question views skipped after at least 3 seconds." /><MetricCard label="Give-up rate" value={formatPercent(metrics.giveUpRate)} title="Question views left after at least 30 seconds without submission." /><MetricCard label="Struggle rate" value={formatPercent(metrics.struggleRate)} title="Long solves (2+ minutes), or incorrect answers after at least one minute." /><MetricCard label="Explanation opens" value={formatNumber(metrics.explanationOpens)} /><MetricCard label="Explanation open rate" value={formatPercent(metrics.explanationOpenRate)} /><MetricCard label="Explanation video starts" value={formatNumber(metrics.explanationVideoStarts)} /><MetricCard label="Video completion" value={formatPercent(metrics.explanationVideoCompletionRate)} /><MetricCard label="Reports" value={formatNumber(metrics.reports)} />
       </div>

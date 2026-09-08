@@ -43,8 +43,9 @@ import { splitMathSegments } from "@/lib/math/segments";
 const RENDER_CACHE = new Map<string, string>();
 const RENDER_CACHE_LIMIT = 500;
 
-function renderMath(source: string): string {
-  const cached = RENDER_CACHE.get(source);
+function renderMath(source: string, displayMode = false): string {
+  const cacheKey = `${displayMode ? "display" : "inline"}:${source}`;
+  const cached = RENDER_CACHE.get(cacheKey);
   if (cached !== undefined) return cached;
 
   let html: string;
@@ -61,7 +62,7 @@ function renderMath(source: string): string {
       // migration converts the common glyphs, but content authored by hand
       // may still carry one.
       strict: false,
-      displayMode: false,
+      displayMode,
       output: "htmlAndMathml",
     });
   } catch {
@@ -71,7 +72,7 @@ function renderMath(source: string): string {
   }
 
   if (RENDER_CACHE.size >= RENDER_CACHE_LIMIT) RENDER_CACHE.clear();
-  RENDER_CACHE.set(source, html);
+  RENDER_CACHE.set(cacheKey, html);
   return html;
 }
 
@@ -114,5 +115,30 @@ export function MathText({ text, as: Wrapper = "span", className }: MathTextProp
         );
       })}
     </Wrapper>
+  );
+}
+
+type DisplayMathProps = {
+  source: string;
+  className?: string;
+};
+
+/** Raw LaTeX rendered in KaTeX display mode; no `$` authoring syntax needed. */
+export function DisplayMath({ source, className }: DisplayMathProps) {
+  const html = renderMath(source, true);
+
+  if (html === "") {
+    return (
+      <div className={className}>
+        <code className="whitespace-pre-wrap break-words">{source}</code>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={className}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }

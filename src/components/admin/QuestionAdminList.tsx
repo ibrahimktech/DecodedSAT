@@ -13,6 +13,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  resolveQuestionSkillReviewAction,
   setQuestionActiveAction,
   updateQuestionAction,
 } from "@/app/admin/questions/actions";
@@ -20,12 +21,16 @@ import {
   QuestionFormFields,
   type QuestionDraft,
 } from "@/components/admin/QuestionFormFields";
-import { MathText } from "@/components/app/MathText";
+import { QuestionContent } from "@/components/app/QuestionContent";
 import type { AdminQuestion, AdminVideoOption } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
 import {
   DIFFICULTY_LABELS,
 } from "@/lib/learn/types";
+import {
+  legacyPromptToBlocks,
+  questionContentAssetPaths,
+} from "@/lib/questions/content";
 
 type Props = {
   questions: AdminQuestion[];
@@ -105,6 +110,18 @@ function QuestionRow({
     });
   };
 
+  const acceptSkill = () => {
+    setMessage(null);
+    startTransition(async () => {
+      const result = await resolveQuestionSkillReviewAction({
+        questionId: question.id,
+        skillId: question.skillReview?.suggestedSkillId ?? question.subtopicId,
+      });
+      if (result.status === "ok") router.refresh();
+      else setMessage(result.message);
+    });
+  };
+
   return (
     <li
       id={`question-${question.id}`}
@@ -117,10 +134,10 @@ function QuestionRow({
           {/* Typeset, so the admin sees what the student will see. The edit
               form below deliberately does NOT — a textarea has to show the raw
               `$...$` source, or the maths becomes uneditable. */}
-          <MathText
-            as="p"
-            text={question.prompt}
-            className="font-question whitespace-pre-wrap text-base font-medium leading-7 text-ink"
+          <QuestionContent
+            legacyText={question.prompt}
+            contentBlocks={question.contentBlocks}
+            textClassName="font-question text-base font-medium leading-7 text-ink"
           />
           <p className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
             <span className="rounded-lg bg-accent-chip px-2 py-0.5 text-accent">
@@ -186,6 +203,41 @@ function QuestionRow({
         </div>
       </div>
 
+      {question.skillReview?.status === "pending" && (
+        <div className="mt-3 rounded-xl border border-insight bg-insight-chip px-3 py-3 text-sm text-ink">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">
+                Needs skill review · {question.skillReview.confidence}
+              </p>
+              <p className="mt-1 text-muted">
+                Previous: {question.skillReview.oldSkillName} · Suggested: {question.subtopicName}
+              </p>
+              <p className="mt-1 leading-relaxed text-muted">
+                {question.skillReview.reason}
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={acceptSkill}
+                disabled={pending}
+                className="rounded-lg bg-accent px-3 py-1.5 font-semibold text-white disabled:opacity-50"
+              >
+                Accept
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="rounded-lg border border-hairline bg-surface px-3 py-1.5 font-semibold text-ink"
+              >
+                Change skill
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {message && !editing && (
         <p
           role="alert"
@@ -230,6 +282,8 @@ function QuestionEditForm({
 }) {
   const [draft, setDraft] = useState<QuestionDraft>({
     prompt: question.prompt,
+    contentBlocks:
+      question.contentBlocks ?? legacyPromptToBlocks(question.prompt),
     choices: [...question.choices],
     correctChoice: question.correctChoice,
     explanation: question.explanation,
@@ -248,6 +302,7 @@ function QuestionEditForm({
         id: question.id,
         subtopicId: draft.subtopicId,
         prompt: draft.prompt,
+        contentBlocks: draft.contentBlocks,
         choices: draft.choices,
         correctChoice: draft.correctChoice,
         explanation: draft.explanation,
@@ -266,11 +321,13 @@ function QuestionEditForm({
     <div className="mt-4 flex flex-col gap-3 border-t border-hairline pt-4">
       <QuestionFormFields
         idPrefix={`edit-${question.id}`}
+        questionId={question.id}
         value={draft}
         onChange={setDraft}
         domains={domains}
         subtopics={subtopics}
         videos={videos}
+        persistedAssetPaths={questionContentAssetPaths(question.contentBlocks)}
         compact
       />
 

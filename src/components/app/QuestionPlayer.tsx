@@ -85,6 +85,7 @@ import {
   CalculatorToggle,
 } from "@/components/app/CalculatorPanel";
 import { MathText } from "@/components/app/MathText";
+import { QuestionContent } from "@/components/app/QuestionContent";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { Skeleton } from "@/components/app/Skeleton";
 import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
@@ -664,7 +665,7 @@ export function QuestionPlayer({
               Resume practicing
             </button>
             <Link href={changeFiltersHref} className={ctaClassName("secondary")}>
-              Change topics
+              Change skills
             </Link>
           </div>
         </section>
@@ -700,7 +701,7 @@ export function QuestionPlayer({
               {shuffled ? "Reshuffle and continue" : "Keep practicing"}
             </button>
             <Link href={changeFiltersHref} className={ctaClassName("secondary")}>
-              Change topics
+              Change skills
             </Link>
           </div>
         </section>
@@ -778,7 +779,7 @@ export function QuestionPlayer({
     <ExamShell
       left={
         <>
-          <ExitButton href={changeFiltersHref} label="Change topics" />
+          <ExitButton href={changeFiltersHref} label="Change skills" />
           <p className="truncate text-xs text-muted">
             {answeredToday + answeredCount} of {dailyGoal} today
           </p>
@@ -1001,10 +1002,10 @@ export function QuestionPlayer({
         }
       />
 
-      <MathText
-        as="p"
-        text={question.prompt}
-        className="mt-5 font-question text-lg leading-7 whitespace-pre-line text-ink"
+      <QuestionContent
+        legacyText={question.prompt}
+        contentBlocks={question.contentBlocks}
+        className="mt-5"
       />
 
       <div className="mt-6">
@@ -1050,7 +1051,7 @@ export function QuestionPlayer({
                   rel="noopener noreferrer"
                   className="font-semibold underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 >
-                  Review this topic
+                  Review this skill
                 </Link>{" "}
                 with a {question.subtopicName} explainer.
               </p>

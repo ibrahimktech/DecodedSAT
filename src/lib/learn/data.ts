@@ -27,6 +27,7 @@ import type {
   Subtopic,
 } from "./types";
 import type { QuestionSetFilters } from "./schemas";
+import { parseQuestionContentBlocks } from "@/lib/questions/content";
 
 /** Logs a query failure without letting provider detail reach the page. */
 function logQueryError(label: string, error: unknown): void {
@@ -64,6 +65,7 @@ export async function getSubtopics(
   const { data, error } = await supabase
     .from("subtopics")
     .select("id, domain_id, slug, name")
+    .eq("active", true)
     .order("position");
 
   if (error) {
@@ -791,7 +793,7 @@ export async function getQuestionsByIds(
   const { data, error } = await supabase
     .from("questions")
     .select(
-      "id, prompt, choices, difficulty, subtopics!inner(id, name, slug)",
+      "id, prompt, content_blocks, choices, difficulty, subtopics!inner(id, name, slug)",
     )
     .eq("is_active", true)
     .in("id", questionIds);
@@ -804,6 +806,7 @@ export async function getQuestionsByIds(
   const rows = ((data ?? []) as unknown as Array<{
     id: string;
     prompt: string;
+    content_blocks: unknown;
     choices: unknown;
     difficulty: Difficulty;
     subtopics: { id: string; name: string; slug: string };
@@ -831,6 +834,7 @@ export async function getQuestionsByIds(
         {
           id: row.id,
           prompt: row.prompt,
+          contentBlocks: parseQuestionContentBlocks(row.content_blocks),
           choices: toChoices(row.choices),
           difficulty: row.difficulty,
           subtopicName: row.subtopics.name,
@@ -1285,7 +1289,7 @@ export async function getSectionQuestions(
 ): Promise<PracticeQuestion[]> {
   const { data, error } = await supabase
     .from("practice_section_questions")
-    .select("position, questions!inner(id, prompt, choices)")
+    .select("position, questions!inner(id, prompt, content_blocks, choices)")
     .eq("section_id", sectionId)
     .order("position");
 
@@ -1295,11 +1299,17 @@ export async function getSectionQuestions(
   }
 
   return ((data ?? []) as unknown as Array<{
-    questions: { id: string; prompt: string; choices: unknown };
+    questions: {
+      id: string;
+      prompt: string;
+      content_blocks: unknown;
+      choices: unknown;
+    };
   }>)
     .map((row) => ({
       id: row.questions.id,
       prompt: row.questions.prompt,
+      contentBlocks: parseQuestionContentBlocks(row.questions.content_blocks),
       choices: toChoices(row.questions.choices),
     }))
     .filter((question) => question.choices.length === 4);
@@ -1311,6 +1321,7 @@ export type ResultItem = {
   id: string;
   position: number;
   prompt: string;
+  contentBlocks: import("@/lib/questions/content").QuestionContentBlock[] | null;
   choices: string[];
   selectedChoice: number | null;
   isCorrect: boolean | null;
@@ -1365,7 +1376,7 @@ export async function getPracticeResults(
     supabase
       .from("practice_section_questions")
       .select(
-        "position, questions!inner(id, prompt, choices, subtopics!inner(id, name, slug))",
+        "position, questions!inner(id, prompt, content_blocks, choices, subtopics!inner(id, name, slug))",
       )
       .eq("section_id", attempt.practice_section_id)
       .order("position"),
@@ -1386,6 +1397,7 @@ export async function getPracticeResults(
     questions: {
       id: string;
       prompt: string;
+      content_blocks: unknown;
       choices: unknown;
       subtopics: { id: string; name: string; slug: string };
     };
@@ -1470,6 +1482,9 @@ export async function getPracticeResults(
         id: row.questions.id,
         position: row.position,
         prompt: row.questions.prompt,
+        contentBlocks: parseQuestionContentBlocks(
+          row.questions.content_blocks,
+        ),
         choices: toChoices(row.questions.choices),
         selectedChoice: answer?.selected_choice ?? null,
         isCorrect: answer?.is_correct ?? null,

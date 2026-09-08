@@ -42,6 +42,7 @@ export default async function AdminQuestionsPage({
     set: single("set"),
     difficulty: single("difficulty"),
     status: single("status"),
+    review: single("review"),
     q: single("q"),
   });
 
@@ -114,11 +115,11 @@ export default async function AdminQuestionsPage({
           </FilterSelect>
 
           <FilterSelect
-            label="Subtopic"
+            label="Skill"
             name="subtopic"
             value={filters.subtopic}
           >
-            <option value="">All subtopics</option>
+            <option value="">All skills</option>
             {domains.map((domain) => (
               <optgroup key={domain.id} label={domain.name}>
                 {subtopics
@@ -158,6 +159,16 @@ export default async function AdminQuestionsPage({
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
             <option value="all">All</option>
+          </FilterSelect>
+
+          <FilterSelect
+            label="Skill review"
+            name="review"
+            value={filters.review}
+          >
+            <option value="">Any review state</option>
+            <option value="needs-review">Needs skill review</option>
+            <option value="uncategorized">Uncategorized</option>
           </FilterSelect>
 
           <label className="flex min-w-40 flex-1 flex-col gap-1 text-sm font-medium text-muted">

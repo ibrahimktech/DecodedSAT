@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { MathText } from "@/components/app/MathText";
+import { QuestionContent } from "@/components/app/QuestionContent";
 import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
 import { CtaButton } from "@/components/CtaButton";
 import { requireUser } from "@/lib/auth/require-user";
@@ -156,10 +157,11 @@ export default async function PracticeTestReviewPage({
                       </p>
                     </div>
 
-                    <MathText
-                      as="p"
-                      text={item.prompt}
-                      className="mt-3 font-question text-base leading-7 whitespace-pre-line text-ink"
+                    <QuestionContent
+                      legacyText={item.prompt}
+                      contentBlocks={item.contentBlocks}
+                      className="mt-3"
+                      textClassName="font-question text-base leading-7 text-ink"
                     />
 
                     <ul className="mt-4 flex flex-col gap-2">

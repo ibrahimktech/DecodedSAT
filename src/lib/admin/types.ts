@@ -8,11 +8,13 @@
 
 import type { Difficulty } from "@/lib/learn/types";
 import type { QuestionReportReason } from "@/lib/learn/types";
+import type { QuestionContentBlock } from "@/lib/questions/content";
 
 /** A question as the admin sees it — answer key included. */
 export type AdminQuestion = {
   id: string;
   prompt: string;
+  contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
   correctChoice: number;
   explanation: string;
@@ -25,6 +27,17 @@ export type AdminQuestion = {
   domainName: string;
   setName: string | null;
   solutionVideo: AdminQuestionSolutionVideo | null;
+  skillReview: AdminQuestionSkillReview | null;
+};
+
+export type SkillReviewConfidence = "HIGH" | "MEDIUM" | "LOW";
+
+export type AdminQuestionSkillReview = {
+  confidence: SkillReviewConfidence;
+  reason: string;
+  status: "applied" | "pending" | "accepted" | "changed";
+  oldSkillName: string;
+  suggestedSkillId: string | null;
 };
 
 export type AdminQuestionSolutionVideo = {
@@ -70,6 +83,7 @@ export type AdminQuestionReportSummary = {
 
 export type QuestionReportSnapshot = {
   prompt: string;
+  contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
   correctChoice: number;
 };
@@ -192,6 +206,10 @@ export type CreateQuestionResult =
       message: string;
       fieldErrors?: Record<string, string>;
     };
+
+export type QuestionAssetActionResult =
+  | { status: "ok"; storagePath: string }
+  | { status: "error" | "rate_limited"; message: string };
 
 /** The upload action's form state, rendered as the import summary. */
 export type UploadState =

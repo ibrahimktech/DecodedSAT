@@ -244,7 +244,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
             <p className="text-[0.9375rem] leading-relaxed text-muted">
-              Nothing in progress yet — pick a topic and answer your first
+              Nothing in progress yet — pick a skill and answer your first
               questions.
             </p>
             <CtaButton href="/questions">Start practicing</CtaButton>

@@ -2,9 +2,14 @@
 
 import type { ReactNode } from "react";
 import { MathText } from "@/components/app/MathText";
+import { QuestionContentEditor } from "@/components/admin/QuestionContentEditor";
 import { SolutionVideoSelector } from "@/components/admin/SolutionVideoSelector";
 import type { AdminVideoOption } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
+import {
+  contentBlocksToLegacyPrompt,
+  type QuestionContentBlock,
+} from "@/lib/questions/content";
 import {
   CHOICE_LETTERS,
   DIFFICULTIES,
@@ -14,6 +19,7 @@ import {
 
 export type QuestionDraft = {
   prompt: string;
+  contentBlocks: QuestionContentBlock[];
   choices: string[];
   correctChoice: number;
   explanation: string;
@@ -97,6 +103,7 @@ function PreviewText({ text, empty }: { text: string; empty: string }) {
 /** Shared question fields used by both manual creation and inline editing. */
 export function QuestionFormFields({
   idPrefix,
+  questionId,
   value,
   onChange,
   domains,
@@ -104,8 +111,10 @@ export function QuestionFormFields({
   videos,
   errors = {},
   compact = false,
+  persistedAssetPaths = [],
 }: {
   idPrefix: string;
+  questionId: string;
   value: QuestionDraft;
   onChange: (value: QuestionDraft) => void;
   domains: Domain[];
@@ -113,6 +122,7 @@ export function QuestionFormFields({
   videos: AdminVideoOption[];
   errors?: QuestionFieldErrors;
   compact?: boolean;
+  persistedAssetPaths?: string[];
 }) {
   const domainSubtopics = subtopics.filter(
     (subtopic) => subtopic.domainId === value.domainId,
@@ -126,32 +136,29 @@ export function QuestionFormFields({
   return (
     <div className={compact ? "flex flex-col gap-3" : undefined}>
       <FormSection
-        title="Question"
-        description="Write the prompt exactly as students should see it. Use $...$ for inline LaTeX."
+        title="Question Content"
+        description="Build the question from text, centered equations, diagrams, and tables. Text keeps the existing $...$ inline LaTeX syntax."
         compact={compact}
-        preview={
-          compact ? undefined : (
-            <PreviewText text={value.prompt} empty="Question preview" />
-          )
-        }
       >
-        <label className="flex flex-col gap-1 text-sm font-medium text-muted">
-          Question content <span className="sr-only">(required)</span>
-          <textarea
-            id={`${idPrefix}-prompt`}
-            value={value.prompt}
-            onChange={(event) => update("prompt", event.target.value)}
-            rows={compact ? 3 : 6}
-            maxLength={4000}
-            required
-            autoFocus={!compact}
-            aria-invalid={Boolean(errors.prompt)}
-            aria-describedby={errors.prompt ? `${idPrefix}-prompt-error` : undefined}
-            placeholder="Enter the SAT question. LaTeX such as $x^2$ is preserved."
-            className={FIELD_CLASS}
-          />
-          <FieldError id={`${idPrefix}-prompt-error`}>{errors.prompt}</FieldError>
-        </label>
+        <QuestionContentEditor
+          questionId={questionId}
+          blocks={value.contentBlocks}
+          persistedAssetPaths={persistedAssetPaths}
+          onChange={(contentBlocks) =>
+            onChange({
+              ...value,
+              contentBlocks,
+              prompt: contentBlocksToLegacyPrompt(contentBlocks).slice(0, 4000),
+            })
+          }
+          error={
+            errors.contentBlocks ??
+            Object.entries(errors).find(([key]) =>
+              key.startsWith("contentBlocks."),
+            )?.[1] ??
+            errors.prompt
+          }
+        />
       </FormSection>
 
       <FormSection
@@ -274,7 +281,7 @@ export function QuestionFormFields({
           </label>
 
           <label className="flex flex-col gap-1 text-sm font-medium text-muted">
-            Skill / subtopic
+            Skill
             <select
               value={value.subtopicId}
               onChange={(event) => update("subtopicId", event.target.value)}

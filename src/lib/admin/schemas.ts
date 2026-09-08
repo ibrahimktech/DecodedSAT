@@ -12,6 +12,10 @@
  */
 
 import { z } from "zod";
+import {
+  QuestionContentBlocksSchema,
+  contentBlocksToLegacyPrompt,
+} from "@/lib/questions/content";
 
 export const CHOICE_LABELS = ["A", "B", "C", "D"] as const;
 
@@ -27,11 +31,13 @@ const UploadChoiceSchema = z.object({
   text: contentText(1000),
 });
 
-export const UploadQuestionSchema = z.object({
+const UploadQuestionBaseSchema = z.object({
   external_id: contentText(64),
   domain: contentText(100),
   subtopic: contentText(120),
-  prompt: contentText(4000),
+  prompt: contentText(4000).optional(),
+  question_text: contentText(4000).optional(),
+  content_blocks: QuestionContentBlocksSchema.optional(),
   // Exactly four choices labelled exactly A–D (order in the file is
   // irrelevant; storage orders by label). `correct_answer` matching a label
   // follows automatically: with the full A–D set required, every enum value
@@ -47,6 +53,36 @@ export const UploadQuestionSchema = z.object({
   explanation: contentText(4000),
   difficulty: DifficultyEnum,
 });
+
+function validateUploadedQuestionContent(
+  value: z.infer<typeof UploadQuestionBaseSchema>,
+  context: z.RefinementCtx,
+) {
+  if (!value.prompt && !value.question_text && !value.content_blocks) {
+    context.addIssue({
+      code: "custom",
+      path: ["prompt"],
+      message: "Provide prompt, question_text, or content_blocks.",
+    });
+  }
+}
+
+function normalizeUploadedQuestion<
+  Value extends z.infer<typeof UploadQuestionBaseSchema>,
+>(value: Value) {
+  const { question_text: questionText, ...rest } = value;
+  return {
+    ...rest,
+    prompt:
+      value.prompt ??
+      questionText ??
+      contentBlocksToLegacyPrompt(value.content_blocks ?? []),
+  };
+}
+
+export const UploadQuestionSchema = UploadQuestionBaseSchema
+  .superRefine(validateUploadedQuestionContent)
+  .transform(normalizeUploadedQuestion);
 
 export const UploadPayloadSchema = z.object({
   set_name: contentText(120),
@@ -71,13 +107,14 @@ export const QuestionFieldsSchema = z.object({
   subtopicId: z
     .string()
     .trim()
-    .min(1, "Choose a skill / subtopic.")
-    .pipe(z.uuid("Choose an existing skill / subtopic.")),
+    .min(1, "Choose a skill.")
+    .pipe(z.uuid("Choose an existing skill.")),
   prompt: z
     .string()
     .trim()
     .min(1, "Enter the question prompt.")
     .max(4000, "Use 4,000 characters or fewer."),
+  contentBlocks: QuestionContentBlocksSchema.nullable().optional(),
   choices: z
     .array(
       z
@@ -112,6 +149,7 @@ export const EditQuestionSchema = QuestionFieldsSchema.extend({
  * pair when present: `externalId` is only unique and meaningful inside a set.
  */
 export const CreateQuestionSchema = QuestionFieldsSchema.extend({
+  id: z.uuid().optional(),
   questionSetId: z.union([z.uuid(), z.literal("")]),
   externalId: z
     .string()
@@ -297,9 +335,12 @@ export const EditPracticeTestSchema = z.object({
  * question set takes, with one field added, so there is one authoring format
  * to learn and one validator to keep correct.
  */
-export const UploadTestQuestionSchema = UploadQuestionSchema.extend({
-  module_number: z.union([z.literal(1), z.literal(2)]),
-});
+export const UploadTestQuestionSchema = UploadQuestionBaseSchema
+  .extend({
+    module_number: z.union([z.literal(1), z.literal(2)]),
+  })
+  .superRefine(validateUploadedQuestionContent)
+  .transform(normalizeUploadedQuestion);
 
 export const UploadTestPayloadSchema = z.object({
   create_new_subtopics: z.boolean().optional().default(false),
@@ -332,6 +373,10 @@ export const AdminQuestionFiltersSchema = z.object({
   set: uuidParam,
   difficulty: DifficultyEnum.optional().catch(undefined),
   status: statusParam,
+  review: z
+    .enum(["needs-review", "uncategorized"])
+    .optional()
+    .catch(undefined),
   q: z
     .string()
     .trim()

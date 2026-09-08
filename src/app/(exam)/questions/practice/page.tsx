@@ -104,11 +104,11 @@ export default async function QuestionsPracticePage({
             Nothing matches this selection
           </h1>
           <p className="mt-2 text-[0.9375rem] leading-relaxed text-muted">
-            There are no questions in the bank for these topics and difficulties
+            There are no questions in the bank for these skills and difficulties
             yet. Widen the selection and try again.
           </p>
           <div className="mt-6">
-            <CtaButton href={pickerHref}>Change topics</CtaButton>
+            <CtaButton href={pickerHref}>Change skills</CtaButton>
           </div>
         </section>
       </div>

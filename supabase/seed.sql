@@ -26,32 +26,39 @@
 insert into public.domains (id, slug, name, position) values
   ('10000000-0000-4000-8000-000000000001', 'algebra',                       'Algebra',                          1),
   ('10000000-0000-4000-8000-000000000002', 'advanced-math',                 'Advanced Math',                    2),
-  ('10000000-0000-4000-8000-000000000003', 'problem-solving-data-analysis', 'Problem-Solving & Data Analysis', 3),
-  ('10000000-0000-4000-8000-000000000004', 'geometry-trigonometry',         'Geometry & Trigonometry',          4)
+  ('10000000-0000-4000-8000-000000000003', 'problem-solving-data-analysis', 'Problem-Solving and Data Analysis', 3),
+  ('10000000-0000-4000-8000-000000000004', 'geometry-trigonometry',         'Geometry and Trigonometry',          4)
 on conflict (id) do update
   set slug = excluded.slug, name = excluded.name, position = excluded.position;
 
 
 -- --- Subtopics ---------------------------------------------------------------
--- The admin upload can add more under a domain when `create_new_subtopics` is
--- true; those get generated ids and positions after these fixed ones.
+-- `subtopics` is the compatibility table name for the fixed student-facing
+-- skills. Admin imports resolve legacy names but do not create extra skills.
 
 insert into public.subtopics (id, domain_id, slug, name, position) values
-  ('20000000-0000-4000-8000-000000000011', '10000000-0000-4000-8000-000000000001', 'linear-equations',          'Linear equations in one variable', 1),
-  ('20000000-0000-4000-8000-000000000012', '10000000-0000-4000-8000-000000000001', 'systems-of-equations',      'Systems of linear equations',      2),
-  ('20000000-0000-4000-8000-000000000013', '10000000-0000-4000-8000-000000000001', 'linear-functions-graphs',   'Linear functions & graphs',        3),
-  ('20000000-0000-4000-8000-000000000021', '10000000-0000-4000-8000-000000000002', 'quadratics',                'Quadratics & parabolas',           1),
-  ('20000000-0000-4000-8000-000000000022', '10000000-0000-4000-8000-000000000002', 'exponents-radicals',        'Exponents & radicals',             2),
-  ('20000000-0000-4000-8000-000000000023', '10000000-0000-4000-8000-000000000002', 'functions-transformations', 'Function notation & transformations', 3),
-  ('20000000-0000-4000-8000-000000000031', '10000000-0000-4000-8000-000000000003', 'ratios-proportions',        'Ratios, rates & proportions',      1),
-  ('20000000-0000-4000-8000-000000000032', '10000000-0000-4000-8000-000000000003', 'percentages',               'Percentages',                      2),
-  ('20000000-0000-4000-8000-000000000033', '10000000-0000-4000-8000-000000000003', 'statistics',                'Mean, median & spread',            3),
-  ('20000000-0000-4000-8000-000000000041', '10000000-0000-4000-8000-000000000004', 'triangles',                 'Triangle properties',              1),
-  ('20000000-0000-4000-8000-000000000042', '10000000-0000-4000-8000-000000000004', 'circles',                   'Circles: area, circumference & arcs', 2),
-  ('20000000-0000-4000-8000-000000000043', '10000000-0000-4000-8000-000000000004', 'trigonometry',              'Right-triangle trigonometry',      3)
+  ('20000000-0000-4000-8000-000000000011', '10000000-0000-4000-8000-000000000001', 'solving-linear-equations',               'Solving linear equations',                  1),
+  ('20000000-0000-4000-8000-000000000014', '10000000-0000-4000-8000-000000000001', 'understanding-linear-functions',          'Understanding linear functions',             2),
+  ('20000000-0000-4000-8000-000000000013', '10000000-0000-4000-8000-000000000001', 'graphing-linear-equations',               'Graphing linear equations',                  3),
+  ('20000000-0000-4000-8000-000000000012', '10000000-0000-4000-8000-000000000001', 'solving-systems-of-linear-equations',     'Solving systems of linear equations',        4),
+  ('20000000-0000-4000-8000-000000000015', '10000000-0000-4000-8000-000000000001', 'working-with-linear-inequalities',         'Working with linear inequalities',           5),
+  ('20000000-0000-4000-8000-000000000023', '10000000-0000-4000-8000-000000000002', 'understanding-nonlinear-functions',       'Understanding nonlinear functions',          1),
+  ('20000000-0000-4000-8000-000000000021', '10000000-0000-4000-8000-000000000002', 'solving-nonlinear-equations-and-systems', 'Solving nonlinear equations and systems',    2),
+  ('20000000-0000-4000-8000-000000000022', '10000000-0000-4000-8000-000000000002', 'rewriting-and-simplifying-expressions',   'Rewriting and simplifying expressions',      3),
+  ('20000000-0000-4000-8000-000000000031', '10000000-0000-4000-8000-000000000003', 'ratios-rates-and-unit-conversions',       'Ratios, rates, and unit conversions',        1),
+  ('20000000-0000-4000-8000-000000000032', '10000000-0000-4000-8000-000000000003', 'percent-problems',                        'Percent problems',                           2),
+  ('20000000-0000-4000-8000-000000000033', '10000000-0000-4000-8000-000000000003', 'data-distributions-and-averages',         'Data distributions and averages',            3),
+  ('20000000-0000-4000-8000-000000000034', '10000000-0000-4000-8000-000000000003', 'scatterplots-and-data-models',            'Scatterplots and data models',               4),
+  ('20000000-0000-4000-8000-000000000035', '10000000-0000-4000-8000-000000000003', 'probability',                             'Probability',                                5),
+  ('20000000-0000-4000-8000-000000000036', '10000000-0000-4000-8000-000000000003', 'statistical-estimates-and-margin-of-error','Statistical estimates and margin of error', 6),
+  ('20000000-0000-4000-8000-000000000037', '10000000-0000-4000-8000-000000000003', 'evaluating-surveys-and-experiments',      'Evaluating surveys and experiments',         7),
+  ('20000000-0000-4000-8000-000000000044', '10000000-0000-4000-8000-000000000004', 'area-surface-area-and-volume',            'Area, surface area, and volume',              1),
+  ('20000000-0000-4000-8000-000000000041', '10000000-0000-4000-8000-000000000004', 'lines-angles-and-triangles',              'Lines, angles, and triangles',                2),
+  ('20000000-0000-4000-8000-000000000043', '10000000-0000-4000-8000-000000000004', 'right-triangles-and-trigonometry',        'Right triangles and trigonometry',            3),
+  ('20000000-0000-4000-8000-000000000042', '10000000-0000-4000-8000-000000000004', 'circle-geometry',                         'Circle geometry',                             4)
 on conflict (id) do update
   set domain_id = excluded.domain_id, slug = excluded.slug,
-      name = excluded.name, position = excluded.position;
+      name = excluded.name, position = excluded.position, active = true;
 
 
 -- --- User stats placeholder --------------------------------------------------

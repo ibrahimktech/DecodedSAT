@@ -24,6 +24,7 @@
 
 import type { Difficulty, Domain, Subtopic } from "./types";
 import type { QuestionSetFilters } from "./schemas";
+import { canonicalSkillSlug } from "@/lib/taxonomy/math";
 
 export type SetSelection = {
   /** Domains selected whole, kept so the URL and the picker stay legible. */
@@ -58,9 +59,9 @@ export function resolveSetSelection(
   const domainSlugs = [...new Set(raw.domainSlugs)].filter((slug) =>
     domains.some((domain) => domain.slug === slug),
   );
-  const subtopicSlugs = [...new Set(raw.subtopicSlugs)].filter((slug) =>
-    knownSubtopicSlugs.has(slug),
-  );
+  const subtopicSlugs = [
+    ...new Set(raw.subtopicSlugs.map(canonicalSkillSlug)),
+  ].filter((slug) => knownSubtopicSlugs.has(slug));
   const difficulties = [...new Set(raw.difficulties)];
 
   const selectedDomainIds = new Set(

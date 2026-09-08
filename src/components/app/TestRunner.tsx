@@ -13,6 +13,8 @@
 import { useEffect, useRef, useState } from "react";
 import { submitPracticeAttemptAction } from "@/app/(app)/practice/actions";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
+import { MathText } from "@/components/app/MathText";
+import { QuestionContent } from "@/components/app/QuestionContent";
 import { ctaClassName } from "@/components/CtaButton";
 import { trackStudentEvent } from "@/lib/analytics/client";
 import { ANALYTICS_THRESHOLDS } from "@/lib/analytics/constants";
@@ -251,9 +253,11 @@ export function TestRunner({
       <p className="mt-5 text-sm font-semibold text-muted">
         Question {index + 1} of {questions.length}
       </p>
-      <p className="mt-2 font-question text-lg leading-7 text-ink">
-        {question.prompt}
-      </p>
+      <QuestionContent
+        legacyText={question.prompt}
+        contentBlocks={question.contentBlocks}
+        className="mt-2"
+      />
 
       <div className="mt-4 flex flex-col gap-2.5" role="group" aria-label="Answer choices">
         {question.choices.map((choice, choiceIndex) => (
@@ -272,7 +276,7 @@ export function TestRunner({
             <span className="font-question font-bold">
               {CHOICE_LETTERS[choiceIndex]}
             </span>
-            <span>{choice}</span>
+            <MathText text={choice} />
           </button>
         ))}
       </div>

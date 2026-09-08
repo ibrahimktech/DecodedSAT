@@ -173,7 +173,7 @@ export function VideoPlacementFields({
           </label>
 
           <label className="flex flex-col gap-1 text-sm font-medium text-muted">
-            Subtopic
+            Skill
             <select
               value={placement.subtopicId}
               onChange={(event) =>
@@ -181,7 +181,7 @@ export function VideoPlacementFields({
               }
               className={FIELD_CLASS}
             >
-              <option value="">Choose a subtopic…</option>
+              <option value="">Choose a skill…</option>
               {domainSubtopics.map((subtopic) => (
                 <option key={subtopic.id} value={subtopic.id}>
                   {subtopic.name}

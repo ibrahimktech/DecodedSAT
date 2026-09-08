@@ -52,7 +52,7 @@ import {
   CalculatorPanel,
   CalculatorToggle,
 } from "@/components/app/CalculatorPanel";
-import { MathText } from "@/components/app/MathText";
+import { QuestionContent } from "@/components/app/QuestionContent";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { ChoiceList } from "@/components/app/exam/ChoiceList";
 import { ExamShell, examButtonClassName } from "@/components/app/exam/ExamShell";
@@ -543,10 +543,10 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
         }
       />
 
-      <MathText
-        as="p"
-        text={question.prompt}
-        className="mt-5 font-question text-lg leading-7 whitespace-pre-line text-ink"
+      <QuestionContent
+        legacyText={question.prompt}
+        contentBlocks={question.contentBlocks}
+        className="mt-5"
       />
 
       <div className="mt-6">
