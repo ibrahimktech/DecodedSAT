@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { AppHeader } from "@/components/app/AppHeader";
 import { NavRail } from "@/components/app/NavRail";
 import { TimeZoneSync } from "@/components/app/TimeZoneSync";
+import { UserPopup } from "@/components/app/UserPopup";
 import { getIsAdmin } from "@/lib/auth/admin";
 import { requireOnboarded } from "@/lib/auth/require-onboarded";
 import { requireUser } from "@/lib/auth/require-user";
+import { listNotifications } from "@/lib/notifications";
+import { getEligiblePopup } from "@/lib/popups";
 
 /**
  * KaTeX's stylesheet, imported once per surface that renders question
@@ -41,7 +45,7 @@ export const metadata: Metadata = {
 export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  await requireUser();
+  const { supabase } = await requireUser();
 
   // Nobody reaches the student app before finishing onboarding. Same three
   // layers again: the proxy redirects first, this catches anything that got
@@ -54,7 +58,11 @@ export default async function AppLayout({
   // is their way back. Purely presentational — rendering it for a non-admin
   // would grant nothing, since /admin re-checks server-side and RLS re-checks
   // in the database.
-  const isAdmin = await getIsAdmin();
+  const [isAdmin, notifications, popup] = await Promise.all([
+    getIsAdmin(),
+    listNotifications(supabase),
+    getEligiblePopup(supabase),
+  ]);
 
   return (
     <div className="flex min-h-screen">
@@ -78,9 +86,11 @@ export default async function AppLayout({
             </Link>
           </div>
         )}
+        <AppHeader notifications={notifications} />
         <main className="min-w-0 flex-1 px-4 py-8 sm:px-8 lg:px-10">
           {children}
         </main>
+        <UserPopup key={popup?.id ?? "no-popup"} popup={popup} />
       </div>
     </div>
   );

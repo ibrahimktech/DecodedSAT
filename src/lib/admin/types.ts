@@ -132,6 +132,22 @@ export type AdminVideoCategory = {
   videoCount: number;
 };
 
+export type AdminPopup = {
+  id: string;
+  title: string;
+  message: string;
+  buttonText: string | null;
+  buttonUrl: string | null;
+  isActive: boolean;
+  startsAt: string;
+  endsAt: string | null;
+  showOnce: boolean;
+  minAnsweredQuestions: number | null;
+  minAccountAgeDays: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AdminPracticeTest = {
   id: string;
   title: string;

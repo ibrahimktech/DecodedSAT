@@ -20,6 +20,7 @@ import type { Difficulty } from "@/lib/learn/types";
 import { parseQuestionContentBlocks } from "@/lib/questions/content";
 import type {
   AdminPracticeTest,
+  AdminPopup,
   AdminQuestion,
   AdminQuestionReport,
   AdminQuestionReportSummary,
@@ -627,6 +628,46 @@ export async function listAdminVideoCategories(
     slug: row.slug,
     isActive: row.is_active,
     videoCount: row.videos?.[0]?.count ?? 0,
+  }));
+}
+
+// --- Popups -----------------------------------------------------------------
+
+export async function listAdminPopups(
+  supabase: SupabaseClient,
+): Promise<AdminPopup[]> {
+  const { data, error } = await supabase
+    .from("popups")
+    .select(
+      "id, title, message, button_text, button_url, is_active, starts_at, ends_at, show_once, min_answered_questions, min_account_age_days, created_at, updated_at",
+    )
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    logQueryError("admin_popups", error);
+    return [];
+  }
+
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: row.id as string,
+    title: row.title as string,
+    message: row.message as string,
+    buttonText: (row.button_text as string | null) ?? null,
+    buttonUrl: (row.button_url as string | null) ?? null,
+    isActive: row.is_active as boolean,
+    startsAt: row.starts_at as string,
+    endsAt: (row.ends_at as string | null) ?? null,
+    showOnce: row.show_once as boolean,
+    minAnsweredQuestions:
+      row.min_answered_questions === null
+        ? null
+        : Number(row.min_answered_questions),
+    minAccountAgeDays:
+      row.min_account_age_days === null
+        ? null
+        : Number(row.min_account_age_days),
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
   }));
 }
 

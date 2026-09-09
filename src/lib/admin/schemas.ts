@@ -196,6 +196,74 @@ export const UpdateQuestionReportSchema = z.object({
   adminNote: z.string().max(2000),
 });
 
+// --- Popups -----------------------------------------------------------------
+
+const safePopupUrl = z
+  .string()
+  .trim()
+  .max(1000)
+  .refine(
+    (value) => {
+      if (value.startsWith("/") && !value.startsWith("//")) return true;
+      try {
+        const url = new URL(value);
+        return url.protocol === "http:" || url.protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    { message: "Use an app path or an http(s) URL." },
+  );
+
+const PopupFieldsSchema = z
+  .object({
+    title: contentText(120),
+    message: contentText(2000),
+    buttonText: z.string().trim().max(60),
+    buttonUrl: z.string().trim().max(1000),
+    isActive: z.boolean(),
+    startsAt: z.iso.datetime(),
+    endsAt: z.union([z.iso.datetime(), z.literal("")]),
+    showOnce: z.boolean(),
+    minAnsweredQuestions: z.number().int().min(1).max(1_000_000).nullable(),
+    minAccountAgeDays: z.number().int().min(1).max(36_500).nullable(),
+  })
+  .superRefine((value, context) => {
+    if ((value.buttonText === "") !== (value.buttonUrl === "")) {
+      context.addIssue({
+        code: "custom",
+        path: value.buttonText === "" ? ["buttonText"] : ["buttonUrl"],
+        message: "Button text and URL must be provided together.",
+      });
+    }
+    if (value.buttonUrl !== "") {
+      const result = safePopupUrl.safeParse(value.buttonUrl);
+      if (!result.success) {
+        context.addIssue({
+          code: "custom",
+          path: ["buttonUrl"],
+          message: "Use an app path or an http(s) URL.",
+        });
+      }
+    }
+    if (value.endsAt !== "" && Date.parse(value.endsAt) <= Date.parse(value.startsAt)) {
+      context.addIssue({
+        code: "custom",
+        path: ["endsAt"],
+        message: "End date must be after the start date.",
+      });
+    }
+  });
+
+export const CreatePopupSchema = PopupFieldsSchema;
+export const UpdatePopupSchema = PopupFieldsSchema.and(
+  z.object({ id: z.uuid() }),
+);
+export const SetPopupActiveSchema = z.object({
+  id: z.uuid(),
+  active: z.boolean(),
+});
+
 export const AdminQuestionReportFiltersSchema = z.object({
   status: z
     .enum(["open", "reviewed", "resolved", "dismissed", "all"])

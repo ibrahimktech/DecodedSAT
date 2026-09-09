@@ -85,6 +85,18 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    href: "/admin/popups",
+    label: "Popups",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M3 8h18" />
+        <path d="M7 6h.01M10 6h.01" />
+        <path d="M8 13h8M8 16h5" />
+      </svg>
+    ),
+  },
+  {
     href: "/admin/videos",
     label: "Videos",
     icon: (
