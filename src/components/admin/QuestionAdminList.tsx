@@ -27,6 +27,7 @@ import type { Domain, Subtopic } from "@/lib/learn/types";
 import {
   DIFFICULTY_LABELS,
 } from "@/lib/learn/types";
+import { QUESTION_TYPE_LABELS } from "@/lib/questions/answers";
 import {
   legacyPromptToBlocks,
   questionContentAssetPaths,
@@ -52,8 +53,7 @@ export function QuestionAdminList({
   if (questions.length === 0) {
     return (
       <div className="rounded-2xl border border-hairline bg-surface px-6 py-10 text-center text-[0.9375rem] text-muted">
-        No questions match these filters. Add a question, upload a set above,
-        or clear the filters.
+        No questions match these filters. Add a question or clear the filters.
       </div>
     );
   }
@@ -145,6 +145,9 @@ function QuestionRow({
             </span>
             <span className="rounded-lg bg-background px-2 py-0.5 text-muted">
               {DIFFICULTY_LABELS[question.difficulty]}
+            </span>
+            <span className="rounded-lg bg-background px-2 py-0.5 text-muted">
+              {QUESTION_TYPE_LABELS[question.questionType]}
             </span>
             {question.setName && (
               <span className="rounded-lg bg-background px-2 py-0.5 text-muted">
@@ -267,7 +270,7 @@ function QuestionRow({
   );
 }
 
-function QuestionEditForm({
+export function QuestionEditForm({
   question,
   domains,
   subtopics,
@@ -286,6 +289,10 @@ function QuestionEditForm({
       question.contentBlocks ?? legacyPromptToBlocks(question.prompt),
     choices: [...question.choices],
     correctChoice: question.correctChoice,
+    questionType: question.questionType,
+    sprAnswerMode: question.sprAnswerMode,
+    sprAnswers: [...question.sprAnswers],
+    sprTolerance: question.sprTolerance,
     explanation: question.explanation,
     difficulty: question.difficulty,
     domainId: question.domainId,
@@ -305,6 +312,10 @@ function QuestionEditForm({
         contentBlocks: draft.contentBlocks,
         choices: draft.choices,
         correctChoice: draft.correctChoice,
+        questionType: draft.questionType,
+        sprAnswerMode: draft.sprAnswerMode,
+        sprAnswers: draft.sprAnswers,
+        sprTolerance: draft.sprTolerance,
         explanation: draft.explanation,
         difficulty: draft.difficulty,
         solutionVideoId: draft.solutionVideoId,

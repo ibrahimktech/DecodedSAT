@@ -63,8 +63,8 @@ export const SAT_MATH_SKILLS = [
 ] as const;
 
 /**
- * Old bookmarks and JSON imports continue to resolve after canonical slugs
- * replace the original seed slugs. Names are normalized separately below.
+ * Old bookmarks continue to resolve after canonical slugs replace the
+ * original seed slugs.
  */
 export const LEGACY_SKILL_SLUG_ALIASES: Readonly<Record<string, string>> = {
   "linear-equations": "solving-linear-equations",
@@ -81,41 +81,6 @@ export const LEGACY_SKILL_SLUG_ALIASES: Readonly<Record<string, string>> = {
   trigonometry: "right-triangles-and-trigonometry",
 };
 
-const LEGACY_SKILL_NAME_ALIASES: Readonly<Record<string, string>> = {
-  "linear equations in one variable": "Solving linear equations",
-  "systems of linear equations": "Solving systems of linear equations",
-  "linear functions & graphs": "Graphing linear equations",
-  "quadratics & parabolas": "Solving nonlinear equations and systems",
-  "exponents & radicals": "Rewriting and simplifying expressions",
-  "function notation & transformations": "Understanding nonlinear functions",
-  "ratios, rates & proportions": "Ratios, rates, and unit conversions",
-  percentages: "Percent problems",
-  "mean, median & spread": "Data distributions and averages",
-  "triangle properties": "Lines, angles, and triangles",
-  "circles: area, circumference & arcs": "Circle geometry",
-  "right-triangle trigonometry": "Right triangles and trigonometry",
-};
-
 export function canonicalSkillSlug(slug: string): string {
   return LEGACY_SKILL_SLUG_ALIASES[slug] ?? slug;
-}
-
-/** Accepts a canonical or legacy imported skill name/slug. */
-export function canonicalSkillImportValue(value: string): string {
-  const trimmed = value.trim();
-  const byName = LEGACY_SKILL_NAME_ALIASES[trimmed.toLowerCase()];
-  if (byName) return byName;
-  return canonicalSkillSlug(trimmed.toLowerCase());
-}
-
-export function canonicalDomainImportValue(value: string): string {
-  const trimmed = value.trim();
-  const lower = trimmed.toLowerCase();
-  if (lower === "problem-solving & data analysis") {
-    return "Problem-Solving and Data Analysis";
-  }
-  if (lower === "geometry & trigonometry") {
-    return "Geometry and Trigonometry";
-  }
-  return trimmed;
 }

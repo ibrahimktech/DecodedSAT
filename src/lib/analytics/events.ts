@@ -43,6 +43,7 @@ export type StudentEventProperties = {
   practice_session_id?: string;
   correct?: boolean;
   selected_choice?: number;
+  question_type?: "multiple_choice" | "student_produced_response";
   answer_time_ms?: number;
   progress_percent?: number;
   watched_seconds?: number;

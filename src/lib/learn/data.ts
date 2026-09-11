@@ -28,6 +28,7 @@ import type {
 } from "./types";
 import type { QuestionSetFilters } from "./schemas";
 import { parseQuestionContentBlocks } from "@/lib/questions/content";
+import type { QuestionType } from "@/lib/questions/answers";
 
 /** Logs a query failure without letting provider detail reach the page. */
 function logQueryError(label: string, error: unknown): void {
@@ -42,6 +43,13 @@ function logQueryError(label: string, error: unknown): void {
 function toChoices(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((choice) => String(choice));
+}
+
+function hasPlayableAnswerShape(
+  questionType: QuestionType,
+  choices: string[],
+): boolean {
+  return questionType === "student_produced_response" || choices.length === 4;
 }
 
 // --- Reference content -------------------------------------------------------
@@ -793,7 +801,7 @@ export async function getQuestionsByIds(
   const { data, error } = await supabase
     .from("questions")
     .select(
-      "id, prompt, content_blocks, choices, difficulty, subtopics!inner(id, name, slug)",
+      "id, prompt, content_blocks, choices, question_type, difficulty, subtopics!inner(id, name, slug)",
     )
     .eq("is_active", true)
     .in("id", questionIds);
@@ -808,9 +816,12 @@ export async function getQuestionsByIds(
     prompt: string;
     content_blocks: unknown;
     choices: unknown;
+    question_type: QuestionType;
     difficulty: Difficulty;
     subtopics: { id: string; name: string; slug: string };
-  }>).filter((row) => toChoices(row.choices).length === 4);
+  }>).filter((row) =>
+    hasPlayableAnswerShape(row.question_type, toChoices(row.choices)),
+  );
 
   if (rows.length === 0) return [];
 
@@ -836,6 +847,7 @@ export async function getQuestionsByIds(
           prompt: row.prompt,
           contentBlocks: parseQuestionContentBlocks(row.content_blocks),
           choices: toChoices(row.choices),
+          questionType: row.question_type,
           difficulty: row.difficulty,
           subtopicName: row.subtopics.name,
           subtopicSlug: row.subtopics.slug,
@@ -1289,7 +1301,7 @@ export async function getSectionQuestions(
 ): Promise<PracticeQuestion[]> {
   const { data, error } = await supabase
     .from("practice_section_questions")
-    .select("position, questions!inner(id, prompt, content_blocks, choices)")
+    .select("position, questions!inner(id, prompt, content_blocks, choices, question_type)")
     .eq("section_id", sectionId)
     .order("position");
 
@@ -1304,6 +1316,7 @@ export async function getSectionQuestions(
       prompt: string;
       content_blocks: unknown;
       choices: unknown;
+      question_type: QuestionType;
     };
   }>)
     .map((row) => ({
@@ -1311,8 +1324,11 @@ export async function getSectionQuestions(
       prompt: row.questions.prompt,
       contentBlocks: parseQuestionContentBlocks(row.questions.content_blocks),
       choices: toChoices(row.questions.choices),
+      questionType: row.questions.question_type,
     }))
-    .filter((question) => question.choices.length === 4);
+    .filter((question) =>
+      hasPlayableAnswerShape(question.questionType, question.choices),
+    );
 }
 
 // --- Practice results --------------------------------------------------------
@@ -1323,10 +1339,14 @@ export type ResultItem = {
   prompt: string;
   contentBlocks: import("@/lib/questions/content").QuestionContentBlock[] | null;
   choices: string[];
+  questionType: QuestionType;
+  selectedAnswer: string | null;
   selectedChoice: number | null;
   isCorrect: boolean | null;
   /** From the solutions view — present once the run is completed. */
   correctChoice: number | null;
+  correctAnswers: string[];
+  correctAnswerTolerance: string | null;
   explanation: string | null;
   subtopicName: string;
   subtopicSlug: string;
@@ -1376,13 +1396,13 @@ export async function getPracticeResults(
     supabase
       .from("practice_section_questions")
       .select(
-        "position, questions!inner(id, prompt, content_blocks, choices, subtopics!inner(id, name, slug))",
+        "position, questions!inner(id, prompt, content_blocks, choices, question_type, subtopics!inner(id, name, slug))",
       )
       .eq("section_id", attempt.practice_section_id)
       .order("position"),
     supabase
       .from("question_attempts")
-      .select("question_id, selected_choice, is_correct")
+      .select("question_id, student_answer, selected_choice, is_correct")
       .eq("practice_attempt_id", attemptId),
   ]);
 
@@ -1399,6 +1419,7 @@ export async function getPracticeResults(
       prompt: string;
       content_blocks: unknown;
       choices: unknown;
+      question_type: QuestionType;
       subtopics: { id: string; name: string; slug: string };
     };
   }>;
@@ -1414,7 +1435,7 @@ export async function getPracticeResults(
     supabase
       .from("attempted_question_solutions")
       .select(
-        "question_id, correct_choice, explanation, solution_video_id, solution_video_title",
+        "question_id, question_type, correct_choice, correct_answers, correct_answer_tolerance, explanation, solution_video_id, solution_video_title",
       )
       .in("question_id", questionIds),
     supabase
@@ -1431,11 +1452,12 @@ export async function getPracticeResults(
 
   const answers = new Map<
     string,
-    { selected_choice: number; is_correct: boolean }
+    { student_answer: string; selected_choice: number | null; is_correct: boolean }
   >();
   for (const row of (answersResult.data ?? []) as Array<{
     question_id: string;
-    selected_choice: number;
+    student_answer: string;
+    selected_choice: number | null;
     is_correct: boolean;
   }>) {
     answers.set(row.question_id, row);
@@ -1444,7 +1466,10 @@ export async function getPracticeResults(
   const solutions = new Map<
     string,
     {
-      correct_choice: number;
+      question_type: QuestionType;
+      correct_choice: number | null;
+      correct_answers: string[] | null;
+      correct_answer_tolerance: string | null;
       explanation: string;
       solution_video_id: string | null;
       solution_video_title: string | null;
@@ -1452,7 +1477,10 @@ export async function getPracticeResults(
   >();
   for (const row of (solutionsResult.data ?? []) as Array<{
     question_id: string;
-    correct_choice: number;
+    question_type: QuestionType;
+    correct_choice: number | null;
+    correct_answers: string[] | null;
+    correct_answer_tolerance: string | null;
     explanation: string;
     solution_video_id: string | null;
     solution_video_title: string | null;
@@ -1486,9 +1514,13 @@ export async function getPracticeResults(
           row.questions.content_blocks,
         ),
         choices: toChoices(row.questions.choices),
+        questionType: row.questions.question_type,
+        selectedAnswer: answer?.student_answer ?? null,
         selectedChoice: answer?.selected_choice ?? null,
         isCorrect: answer?.is_correct ?? null,
         correctChoice: solution?.correct_choice ?? null,
+        correctAnswers: solution?.correct_answers ?? [],
+        correctAnswerTolerance: solution?.correct_answer_tolerance ?? null,
         explanation: solution?.explanation ?? null,
         subtopicName: row.questions.subtopics.name,
         subtopicSlug: row.questions.subtopics.slug,

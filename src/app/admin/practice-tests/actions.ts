@@ -2,7 +2,7 @@
 
 /**
  * Server Actions for /admin/practice-tests: create a test, edit its front
- * matter, soft delete/restore, and upload its questions.
+ * matter, soft delete/restore, and manage its questions individually.
  *
  * Same doctrine as every other admin action: re-establish the admin context
  * server-side, rate limit per user, validate with Zod, sanitize what
@@ -10,32 +10,33 @@
  * underneath. The client showing these controls to admins proves nothing —
  * a Server Action endpoint can be invoked directly.
  *
- * Validation failures return SPECIFIC messages here, unlike the student-facing
- * actions: the reader is a verified admin fixing their own JSON file, not an
- * anonymous prober, so there is no oracle to protect.
+ * Validation failures return specific messages here because the reader is a
+ * verified admin editing trusted content.
  */
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { randomUUID } from "node:crypto";
 import { getAdminActionContext } from "@/lib/auth/admin";
 import { describeError } from "@/lib/auth/describe-error";
 import { GENERIC_ERROR_MESSAGE, rateLimitedMessage } from "@/lib/auth/state";
 import {
   CreatePracticeTestSchema,
+  CreatePracticeTestQuestionSchema,
   EditPracticeTestSchema,
+  MovePracticeTestQuestionSchema,
+  PracticeTestQuestionMutationSchema,
   SetActiveSchema,
-  UPLOAD_MAX_BYTES,
-  UploadTestPayloadSchema,
-  type UploadTestPayload,
 } from "@/lib/admin/schemas";
 import { sanitizeLine, sanitizeMultiline } from "@/lib/admin/sanitize";
-import {
-  canonicalDomainImportValue,
-  canonicalSkillImportValue,
-} from "@/lib/taxonomy/math";
-import type { AdminActionResult, TestUploadState } from "@/lib/admin/types";
+import type {
+  AdminActionResult,
+  CreateQuestionResult,
+} from "@/lib/admin/types";
 import { createRateLimiter } from "@/lib/rate-limit";
 import {
+  QuestionContentBlocksSchema,
+  contentBlocksToLegacyPrompt,
   normalizeCenteredMath,
   type QuestionContentBlock,
 } from "@/lib/questions/content";
@@ -44,13 +45,6 @@ const editLimiter = createRateLimiter({
   limit: 60,
   windowMs: 60_000,
   prefix: "admin-test-edit",
-});
-
-/** Uploads are heavy — 44 questions and their links, in one transaction. */
-const uploadLimiter = createRateLimiter({
-  limit: 10,
-  windowMs: 10 * 60_000,
-  prefix: "admin-test-upload",
 });
 
 /**
@@ -89,38 +83,10 @@ function sanitizeContentBlocks(
   });
 }
 
-function sanitizeTestPayload(payload: UploadTestPayload): UploadTestPayload {
-  return {
-    // Accepted in legacy JSON, deliberately disabled for the fixed 19 skills.
-    create_new_subtopics: false,
-    questions: payload.questions.map((question) => ({
-      external_id: sanitizeLine(question.external_id, 64),
-      domain: canonicalDomainImportValue(
-        sanitizeLine(question.domain, 100),
-      ),
-      subtopic: canonicalSkillImportValue(
-        sanitizeLine(question.subtopic, 120),
-      ),
-      prompt: sanitizeMultiline(question.prompt, 4000),
-      ...(question.content_blocks
-        ? { content_blocks: sanitizeContentBlocks(question.content_blocks) }
-        : {}),
-      choices: question.choices.map((choice) => ({
-        label: choice.label,
-        text: sanitizeLine(choice.text, 1000),
-      })),
-      correct_answer: question.correct_answer,
-      explanation: sanitizeMultiline(question.explanation, 4000),
-      difficulty: question.difficulty,
-      module_number: question.module_number,
-    })),
-  };
-}
-
 /**
  * Creates the test and sends the admin straight to its page, where the
- * questions get uploaded. Two steps rather than one form because the test has
- * to exist before there is anything to attach 44 questions to.
+ * questions are authored. Two steps rather than one form because the test has
+ * to exist before there is anything to attach questions to.
  */
 export async function createPracticeTestAction(
   formData: FormData,
@@ -166,6 +132,9 @@ export async function createPracticeTestAction(
         description: sanitizeMultiline(parsed.data.description, 500) || null,
         difficulty: parsed.data.difficulty,
         test_type: parsed.data.testType,
+        // Publish only after every required module has 22 active questions.
+        // The database enforces the same rule when this flag is turned on.
+        is_active: false,
         created_by: context.user.id,
       })
       .select("id")
@@ -279,6 +248,13 @@ export async function setPracticeTestActiveAction(
       .eq("id", parsed.data.id);
 
     if (error) {
+      if (error.message.includes("incomplete_practice_test")) {
+        return {
+          status: "error",
+          message:
+            "Add 22 active questions to every module before restoring this test.",
+        };
+      }
       console.error(
         `[admin] practice test toggle failed: ${error.code ?? "no_code"} — ${error.message}`,
       );
@@ -295,28 +271,25 @@ export async function setPracticeTestActiveAction(
   }
 }
 
-/**
- * The question upload.
- *
- * All-or-nothing, unlike the question-set upload: `admin_import_practice_test`
- * validates the whole payload first and imports nothing if any row is bad or
- * any module count is wrong. That is the right trade for a test — a partial
- * import would leave a test that looks ready and scores out of the wrong
- * denominator.
- *
- * Re-uploading replaces the question links. Questions already in the test's
- * set are found by `external_id` and reused rather than duplicated, so a
- * re-upload does not orphan the attempt history attached to them.
- */
-export async function uploadTestQuestionsAction(
-  _previous: TestUploadState,
-  formData: FormData,
-): Promise<TestUploadState> {
+function questionFieldErrors(
+  issues: Array<{ path: PropertyKey[]; message: string }>,
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const issue of issues) {
+    const key = issue.path.map(String).join(".");
+    if (key && errors[key] === undefined) errors[key] = issue.message;
+  }
+  return errors;
+}
+
+export async function createPracticeTestQuestionAction(
+  input: unknown,
+): Promise<CreateQuestionResult> {
   try {
     const context = await getAdminActionContext();
     if (!context) return { status: "error", message: GENERIC_ERROR_MESSAGE };
 
-    const rate = await uploadLimiter.check(context.user.id);
+    const rate = await editLimiter.check(context.user.id);
     if (!rate.ok) {
       return {
         status: "rate_limited",
@@ -324,97 +297,184 @@ export async function uploadTestQuestionsAction(
       };
     }
 
-    const testId = formData.get("testId");
-    if (typeof testId !== "string" || testId === "") {
-      return { status: "error", message: GENERIC_ERROR_MESSAGE };
-    }
-
-    const file = formData.get("file");
-    if (!(file instanceof File) || file.size === 0) {
-      return { status: "error", message: "Choose a .json file to upload." };
-    }
-    if (file.size > UPLOAD_MAX_BYTES) {
-      return {
-        status: "error",
-        message: "That file is over 1 MB. A practice test should be well under.",
-      };
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(await file.text());
-    } catch {
-      return { status: "error", message: "That file isn't valid JSON." };
-    }
-
-    const parsed = UploadTestPayloadSchema.safeParse(raw);
+    const parsed = CreatePracticeTestQuestionSchema.safeParse(input);
     if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      const where = issue.path.length > 0 ? ` at ${issue.path.join(".")}` : "";
       return {
         status: "error",
-        message: `That file doesn't match the expected format${where}: ${issue.message}`,
+        message: "Check the highlighted fields and try again.",
+        fieldErrors: questionFieldErrors(parsed.error.issues),
       };
     }
 
-    const sanitized = UploadTestPayloadSchema.safeParse(
-      sanitizeTestPayload(parsed.data),
+    const sanitizedBlocks = parsed.data.contentBlocks
+      ? sanitizeContentBlocks(parsed.data.contentBlocks)
+      : null;
+    const contentResult = QuestionContentBlocksSchema.nullable().safeParse(
+      sanitizedBlocks,
     );
-    if (!sanitized.success) {
-      const issue = sanitized.error.issues[0];
-      const where = issue.path.length > 0 ? ` at ${issue.path.join(".")}` : "";
+    if (!contentResult.success) {
       return {
         status: "error",
-        message: `The sanitized JSON is invalid${where}: ${issue.message}`,
+        message: "Check the highlighted fields and try again.",
+        fieldErrors: {
+          contentBlocks: contentResult.error.issues[0]?.message ?? "Check the question content.",
+        },
       };
     }
 
+    const prompt = sanitizeMultiline(
+      contentResult.data
+        ? contentBlocksToLegacyPrompt(contentResult.data)
+        : parsed.data.prompt,
+      4000,
+    );
+    const explanation = sanitizeMultiline(parsed.data.explanation, 4000);
+    const choices =
+      parsed.data.questionType === "multiple_choice"
+        ? parsed.data.choices.map((choice) => sanitizeLine(choice, 1000))
+        : null;
+    const sprAnswers =
+      parsed.data.questionType === "student_produced_response"
+        ? parsed.data.sprAnswers.map((answer) => answer.trim())
+        : null;
+
+    if (
+      prompt === "" ||
+      explanation === "" ||
+      choices?.some((choice) => choice === "")
+    ) {
+      return {
+        status: "error",
+        message: "Check the highlighted fields and try again.",
+      };
+    }
+
+    const questionId = parsed.data.id ?? randomUUID();
     const { data, error } = await context.supabase.rpc(
-      "admin_import_practice_test",
+      "admin_create_practice_test_question",
       {
-        p_test_id: testId,
-        p_payload: sanitized.data,
+        p_test_id: parsed.data.testId,
+        p_module_number: parsed.data.moduleNumber,
+        p_question_id: questionId,
+        p_subtopic_id: parsed.data.subtopicId,
+        p_prompt: prompt,
+        p_content_blocks: contentResult.data,
+        p_choices: choices,
+        p_correct_choice: parsed.data.correctChoice,
+        p_question_type: parsed.data.questionType,
+        p_spr_answer_mode: parsed.data.sprAnswerMode,
+        p_spr_answers: sprAnswers,
+        p_spr_tolerance: parsed.data.sprTolerance,
+        p_explanation: explanation,
+        p_difficulty: parsed.data.difficulty,
+        p_is_active: true,
+        p_solution_video_id: parsed.data.solutionVideoId ?? null,
       },
     );
 
     if (error) {
+      if (error.message.includes("module_full")) {
+        return { status: "error", message: "That module already has 22 questions." };
+      }
+      if (error.message.includes("invalid_module")) {
+        return { status: "error", message: "Choose a module used by this test." };
+      }
+      if (error.message.includes("unknown_subtopic")) {
+        return {
+          status: "error",
+          message: "Check the highlighted fields and try again.",
+          fieldErrors: { subtopicId: "Choose an existing skill." },
+        };
+      }
       console.error(
-        `[admin] admin_import_practice_test failed: ${error.code ?? "no_code"} — ${error.message}`,
+        `[admin] practice question create failed: ${error.code ?? "no_code"} — ${error.message}`,
       );
       return { status: "error", message: GENERIC_ERROR_MESSAGE };
     }
 
-    const result = data as {
-      ok?: boolean;
-      errors?: string[];
-      imported?: number;
-      reused?: number;
-      linked?: number;
-    } | null;
+    const createdId = typeof data === "string" ? data : null;
+    if (!createdId) return { status: "error", message: GENERIC_ERROR_MESSAGE };
 
-    if (!result) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    revalidatePath(`/admin/practice-tests/${parsed.data.testId}`);
+    revalidatePath("/admin/practice-tests");
+    revalidatePath("/practice");
+    return { status: "ok", id: createdId };
+  } catch (error) {
+    console.error(`[admin] practice question create threw: ${describeError(error)}`);
+    return { status: "error", message: GENERIC_ERROR_MESSAGE };
+  }
+}
 
-    if (result.ok !== true) {
+export async function removePracticeTestQuestionAction(
+  input: unknown,
+): Promise<AdminActionResult> {
+  try {
+    const context = await getAdminActionContext();
+    if (!context) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    const parsed = PracticeTestQuestionMutationSchema.safeParse(input);
+    if (!parsed.success) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+
+    const rate = await editLimiter.check(context.user.id);
+    if (!rate.ok) {
       return {
-        status: "rejected",
-        errors: Array.isArray(result.errors)
-          ? result.errors.map(String)
-          : ["The upload was rejected but no reason came back."],
+        status: "rate_limited",
+        message: rateLimitedMessage(rate.retryAfterSeconds),
       };
     }
 
-    revalidatePath("/admin/practice-tests");
-    revalidatePath(`/admin/practice-tests/${testId}`);
-    revalidatePath("/practice");
+    const { data, error } = await context.supabase.rpc(
+      "admin_remove_practice_test_question",
+      { p_test_id: parsed.data.testId, p_question_id: parsed.data.questionId },
+    );
+    if (error || data !== true) {
+      if (error) console.error(`[admin] practice question remove failed: ${error.message}`);
+      return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    }
 
-    return {
-      status: "ok",
-      imported: result.imported ?? 0,
-      reused: result.reused ?? 0,
-      linked: result.linked ?? 0,
-    };
+    revalidatePath(`/admin/practice-tests/${parsed.data.testId}`);
+    revalidatePath("/admin/practice-tests");
+    revalidatePath("/practice");
+    return { status: "ok" };
   } catch (error) {
-    console.error(`[admin] test upload threw: ${describeError(error)}`);
+    console.error(`[admin] practice question remove threw: ${describeError(error)}`);
+    return { status: "error", message: GENERIC_ERROR_MESSAGE };
+  }
+}
+
+export async function movePracticeTestQuestionAction(
+  input: unknown,
+): Promise<AdminActionResult> {
+  try {
+    const context = await getAdminActionContext();
+    if (!context) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+    const parsed = MovePracticeTestQuestionSchema.safeParse(input);
+    if (!parsed.success) return { status: "error", message: GENERIC_ERROR_MESSAGE };
+
+    const rate = await editLimiter.check(context.user.id);
+    if (!rate.ok) {
+      return {
+        status: "rate_limited",
+        message: rateLimitedMessage(rate.retryAfterSeconds),
+      };
+    }
+
+    const { data, error } = await context.supabase.rpc(
+      "admin_move_practice_test_question",
+      {
+        p_test_id: parsed.data.testId,
+        p_question_id: parsed.data.questionId,
+        p_direction: parsed.data.direction,
+      },
+    );
+    if (error || data !== true) {
+      if (error) console.error(`[admin] practice question move failed: ${error.message}`);
+      return { status: "error", message: "That question cannot move farther." };
+    }
+
+    revalidatePath(`/admin/practice-tests/${parsed.data.testId}`);
+    return { status: "ok" };
+  } catch (error) {
+    console.error(`[admin] practice question move threw: ${describeError(error)}`);
     return { status: "error", message: GENERIC_ERROR_MESSAGE };
   }
 }

@@ -3,17 +3,23 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { EditPracticeTestPanel } from "@/components/admin/EditPracticeTestPanel";
-import { UploadTestQuestionsPanel } from "@/components/admin/UploadTestQuestionsPanel";
-import { getAdminPracticeTest } from "@/lib/admin/data";
+import { ManualQuestionForm } from "@/components/admin/ManualQuestionForm";
+import { PracticeTestQuestionManager } from "@/components/admin/PracticeTestQuestionManager";
+import {
+  getAdminPracticeTest,
+  listAdminPracticeTestQuestions,
+  listAdminVideoOptions,
+} from "@/lib/admin/data";
 import { MODULE_QUESTION_COUNT } from "@/lib/admin/schemas";
 import { requireAdmin } from "@/lib/auth/admin";
+import { getDomains, getSubtopics } from "@/lib/learn/data";
 
 export const metadata: Metadata = {
   title: "Edit practice test",
 };
 
 /**
- * One test: its front matter, and its question upload.
+ * One test: its front matter and manually managed question modules.
  *
  * The route param is untrusted URL input — anything that is not a UUID is a
  * 404 before it reaches a query, and the `admin_practice_tests` view returns
@@ -30,13 +36,19 @@ export default async function AdminPracticeTestPage({
   const parsedId = z.uuid().safeParse(testId);
   if (!parsedId.success) notFound();
 
-  const test = await getAdminPracticeTest(supabase, parsedId.data);
+  const [test, questions, domains, subtopics, videos] = await Promise.all([
+    getAdminPracticeTest(supabase, parsedId.data),
+    listAdminPracticeTestQuestions(supabase, parsedId.data),
+    getDomains(supabase),
+    getSubtopics(supabase),
+    listAdminVideoOptions(supabase),
+  ]);
   if (!test) notFound();
 
-  const hasQuestions = test.module1Count > 0 || test.module2Count > 0;
   const ready =
-    test.module1Count === MODULE_QUESTION_COUNT &&
-    (test.moduleCount === 1 || test.module2Count === MODULE_QUESTION_COUNT);
+    test.module1ActiveCount === MODULE_QUESTION_COUNT &&
+    (test.moduleCount === 1 ||
+      test.module2ActiveCount === MODULE_QUESTION_COUNT);
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -60,15 +72,16 @@ export default async function AdminPracticeTestPage({
 
       {!ready && (
         <p className="mt-4 rounded-xl border border-insight-hairline bg-insight-surface px-4 py-3 text-[0.9375rem] text-insight-dark">
-          This test isn&apos;t usable yet. Module 1 has {test.module1Count} of{" "}
-          {MODULE_QUESTION_COUNT} questions
+          This test isn&apos;t usable yet. Module 1 has {test.module1ActiveCount} of{" "}
+          {MODULE_QUESTION_COUNT} active questions
           {test.moduleCount === 2 && (
             <>
               {" "}
-              and module 2 has {test.module2Count} of {MODULE_QUESTION_COUNT}
+              and module 2 has {test.module2ActiveCount} of {MODULE_QUESTION_COUNT}{" "}
+              active questions
             </>
           )}
-          . Upload a complete file below.
+          . Add or restore questions below until every module is complete.
         </p>
       )}
 
@@ -83,10 +96,35 @@ export default async function AdminPracticeTestPage({
         <EditPracticeTestPanel test={test} />
       </div>
 
-      <UploadTestQuestionsPanel
+      <section className="mt-8">
+        <h2 className="font-display text-2xl font-bold text-ink">
+          Add a question
+        </h2>
+        <p className="mt-1 text-sm text-muted">
+          This is the same full editor used by the Question Bank and supports
+          mixing both question types in either module.
+        </p>
+        <ManualQuestionForm
+          domains={domains}
+          subtopics={subtopics}
+          questionSets={[]}
+          videos={videos}
+          practiceTest={{
+            id: test.id,
+            moduleCount: test.moduleCount,
+            module1Count: test.module1Count,
+            module2Count: test.module2Count,
+          }}
+        />
+      </section>
+
+      <PracticeTestQuestionManager
         testId={test.id}
-        testType={test.testType}
-        hasQuestions={hasQuestions}
+        moduleCount={test.moduleCount}
+        questions={questions}
+        domains={domains}
+        subtopics={subtopics}
+        videos={videos}
       />
     </div>
   );

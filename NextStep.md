@@ -164,9 +164,8 @@ do not build a new authorization path.
      avoids silently mangling sentences like "increases by 3/4 of a percent" vs an actual `3/4`.
    - Log every change made (question id + before/after) so the migration is auditable.
 
-2. **Going forward**, the Step 5 practice-test/question JSON upload format should expect math
-   already authored with `$...$` LaTeX delimiters — document this in the admin upload page's
-   help text.
+2. **Going forward**, the shared practice-test/question editor should expect math
+   already authored with `$...$` LaTeX delimiters and explain that in the editor help text.
 
 3. **Rendering component** — new shared `<MathText text={string} />` component:
    - Install `katex` (not `react-katex` — use `katex.renderToString()` directly for more control
@@ -217,18 +216,13 @@ fixed domain/subtopic structure, per the earlier decision.
 New admin page `/admin/practice-tests`:
 - **Create test**: title, description, difficulty (easy/medium/hard dropdown), type (full/half
   radio — full = 2 modules, half = 1 module, locked timing per Section 0).
-- **Question upload**: same drag-and-drop/file-picker JSON upload UX as Step 5's question bulk
-  upload, reusing the same per-question fields (`external_id`, domain, subtopic, difficulty,
-  prompt, choices, correct_answer, explanation — whatever your Step 5 schema already defines) plus
-  **one new required field per question: `module_number`** (1, or 2 for full tests only).
-  - Reuse Step 5's `external_id` dedup logic: if a question with that `external_id` already
-    exists in `questions`, reuse it (don't duplicate) and just insert the
-    `practice_test_questions` linking row; otherwise create the question first.
-  - Validate module question counts against `test_type` before accepting the upload (full needs
-    22 in module 1 and 22 in module 2; half needs 22 in module 1) — reject with a clear error
-    listing counts found vs. expected, don't silently accept a malformed test.
+- **Question authoring**: use the same full editor as the Question Bank, choose the module for
+  each question, and support manual add, edit, remove, and reorder controls.
+  - Keep module question counts visible while editing (full needs 22 in module 1 and 22 in
+    module 2; half needs 22 in module 1).
+  - Keep incomplete tests hidden and reject activation until every required module is complete.
 - **List/edit tests**: view all tests, edit title/description/difficulty, soft-delete
-  (`is_active = false`), replace/re-upload questions.
+  (`is_active = false`), and manage questions individually.
 
 ---
 
@@ -348,7 +342,7 @@ New admin page `/admin/practice-tests`:
    it touches shared display code used everywhere else you're about to build.
 3. Question bank timer/sessions (Section 3).
 4. Admin video categories (Section 4).
-5. Admin practice test builder + JSON upload (Section 5).
+5. Admin practice test builder + shared question editor (Section 5).
 6. Student practice test taking flow: modules, timing, autosave, abandonment handling (Section 6).
 7. Desmos calculator component, wired into both question bank and practice tests (Section 7).
 8. Progress page (Section 8).
@@ -356,7 +350,7 @@ New admin page `/admin/practice-tests`:
 10. Run the full security checklist (Section 10) before calling this step done.
 
 Test end to end: convert a batch of real questions through the math migration and confirm they
-render correctly; do a full question bank session and confirm it shows up on Progress; upload a
-JSON practice test, take it end-to-end through both modules, deliberately close the tab mid-module
+render correctly; do a full question bank session and confirm it shows up on Progress; manually
+author a practice test, take it end-to-end through both modules, deliberately close the tab mid-module
 and confirm it auto-submits correctly on next login; confirm the heatmap and Progress page numbers
 match what you actually did.

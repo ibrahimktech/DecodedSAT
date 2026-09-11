@@ -13,16 +13,13 @@
 import { useEffect, useRef, useState } from "react";
 import { submitPracticeAttemptAction } from "@/app/(app)/practice/actions";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
-import { MathText } from "@/components/app/MathText";
+import { QuestionAnswerInput } from "@/components/app/QuestionAnswerInput";
 import { QuestionContent } from "@/components/app/QuestionContent";
 import { ctaClassName } from "@/components/CtaButton";
 import { trackStudentEvent } from "@/lib/analytics/client";
 import { ANALYTICS_THRESHOLDS } from "@/lib/analytics/constants";
-import {
-  CHOICE_LETTERS,
-  formatSeconds,
-  type PracticeQuestion,
-} from "@/lib/learn/types";
+import { formatSeconds, type PracticeQuestion } from "@/lib/learn/types";
+import { hasAnswer, isValidNumericAnswer } from "@/lib/questions/answers";
 
 type TestRunnerProps = {
   attemptId: string;
@@ -39,7 +36,7 @@ export function TestRunner({
   questions,
 }: TestRunnerProps) {
   const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [remaining, setRemaining] = useState(() =>
     Math.floor((deadlineMs - Date.now()) / 1000),
   );
@@ -72,13 +69,30 @@ export function TestRunner({
     }
     trackStudentEvent("question_viewed", {
       question_id: current.id,
+      question_type: current.questionType,
       practice_session_id: attemptId,
       source: "timed_section",
     });
   }, [attemptId, index, questions]);
 
-  async function submit() {
+  async function submit(omitInvalidAnswers = false) {
     if (submittedRef.current) return;
+
+    const invalidIndex = questions.findIndex(
+      (entry) =>
+        entry.questionType === "student_produced_response" &&
+        hasAnswer(answers[entry.id]) &&
+        !isValidNumericAnswer(answers[entry.id]),
+    );
+    if (invalidIndex >= 0 && !omitInvalidAnswers) {
+      setIndex(invalidIndex);
+      setConfirming(false);
+      setError(
+        `Question ${invalidIndex + 1} needs a valid integer, decimal, or fraction.`,
+      );
+      return;
+    }
+
     submittedRef.current = true;
     setSubmitting(true);
     setError(null);
@@ -86,19 +100,43 @@ export function TestRunner({
 
     const payload = {
       attemptId,
-      answers: Object.entries(answers).map(([questionId, choice]) => ({
+      answers: Object.entries(answers)
+        .filter(([questionId, answer]) => {
+          if (!hasAnswer(answer)) return false;
+          const answeredQuestion = questions.find(
+            (item) => item.id === questionId,
+          );
+          return !(
+            omitInvalidAnswers &&
+            answeredQuestion?.questionType === "student_produced_response" &&
+            !isValidNumericAnswer(answer)
+          );
+        })
+        .map(([questionId, answer]) => ({
         questionId,
-        choice,
+        answer,
       })),
     };
 
-    for (const [questionId, choice] of Object.entries(answers)) {
+    for (const [questionId, answer] of Object.entries(answers)) {
+      if (!hasAnswer(answer)) continue;
+      const answeredQuestion = questions.find((item) => item.id === questionId);
+      if (
+        omitInvalidAnswers &&
+        answeredQuestion?.questionType === "student_produced_response" &&
+        !isValidNumericAnswer(answer)
+      ) {
+        continue;
+      }
       if (trackedAnswersRef.current.has(questionId)) continue;
       trackedAnswersRef.current.add(questionId);
       trackStudentEvent("question_answered", {
         question_id: questionId,
         practice_session_id: attemptId,
-        selected_choice: choice,
+        ...(answeredQuestion?.questionType === "multiple_choice"
+          ? { selected_choice: Number(answer) }
+          : {}),
+        question_type: answeredQuestion?.questionType,
         answer_time_ms: answerTimesRef.current.get(questionId),
         source: "timed_section",
       });
@@ -109,6 +147,7 @@ export function TestRunner({
       ) {
         trackStudentEvent("question_struggled", {
           question_id: questionId,
+          question_type: answeredQuestion?.questionType,
           practice_session_id: attemptId,
           answer_time_ms: answerTimeMs,
           source: "explainable_time_heuristic",
@@ -145,7 +184,9 @@ export function TestRunner({
       const secondsLeft = Math.floor((deadlineMs - Date.now()) / 1000);
       setRemaining(secondsLeft);
       if (secondsLeft <= 0) {
-        void submitRef.current();
+        // A half-typed numeric token is unanswered when time expires; it must
+        // not prevent the rest of the section from being scored.
+        void submitRef.current(true);
       }
     };
     const interval = setInterval(tick, 500);
@@ -153,12 +194,12 @@ export function TestRunner({
   }, [deadlineMs]);
 
   const question = questions[index];
-  const answeredCount = Object.keys(answers).length;
+  const answeredCount = Object.values(answers).filter(hasAnswer).length;
   const unansweredCount = questions.length - answeredCount;
   const timeExpired = remaining <= 0;
 
   function recordCurrentExit() {
-    if (answers[question.id] !== undefined || currentExitTrackedRef.current) return;
+    if (hasAnswer(answers[question.id]) || currentExitTrackedRef.current) return;
     currentExitTrackedRef.current = true;
     const answerTimeMs = Math.min(
       Math.max(0, Date.now() - currentViewedAtRef.current),
@@ -173,6 +214,7 @@ export function TestRunner({
     if (eventName) {
       trackStudentEvent(eventName, {
         question_id: question.id,
+        question_type: question.questionType,
         practice_session_id: attemptId,
         answer_time_ms: answerTimeMs,
         source: "timed_section",
@@ -195,7 +237,7 @@ export function TestRunner({
     setIndex(nextIndex);
   }
 
-  function choose(choiceIndex: number) {
+  function answerQuestion(answer: string) {
     if (timeExpired || submitting) return;
     setConfirming(false);
     if (!answerTimesRef.current.has(question.id)) {
@@ -205,7 +247,7 @@ export function TestRunner({
         Math.min(Math.max(0, Date.now() - startedAt), 7_200_000),
       );
     }
-    setAnswers((current) => ({ ...current, [question.id]: choiceIndex }));
+    setAnswers((current) => ({ ...current, [question.id]: answer }));
   }
 
   return (
@@ -234,13 +276,13 @@ export function TestRunner({
             type="button"
             onClick={() => goToQuestion(entryIndex)}
             aria-label={`Question ${entryIndex + 1}${
-              answers[entry.id] !== undefined ? ", answered" : ""
+              hasAnswer(answers[entry.id]) ? ", answered" : ""
             }`}
             aria-current={entryIndex === index ? "true" : undefined}
             className={`h-9 w-9 rounded-lg border text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
               entryIndex === index
                 ? "border-transparent bg-accent text-surface"
-                : answers[entry.id] !== undefined
+                : hasAnswer(answers[entry.id])
                   ? "border-accent bg-accent-chip text-accent"
                   : "border-hairline bg-surface text-muted hover:border-accent"
             }`}
@@ -259,26 +301,14 @@ export function TestRunner({
         className="mt-2"
       />
 
-      <div className="mt-4 flex flex-col gap-2.5" role="group" aria-label="Answer choices">
-        {question.choices.map((choice, choiceIndex) => (
-          <button
-            key={choiceIndex}
-            type="button"
-            disabled={timeExpired || submitting}
-            onClick={() => choose(choiceIndex)}
-            aria-pressed={answers[question.id] === choiceIndex}
-            className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3.5 text-left font-question text-[1.0625rem] leading-7 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60 ${
-              answers[question.id] === choiceIndex
-                ? "border-accent bg-accent-chip text-ink"
-                : "border-hairline bg-surface text-ink hover:border-accent"
-            }`}
-          >
-            <span className="font-question font-bold">
-              {CHOICE_LETTERS[choiceIndex]}
-            </span>
-            <MathText text={choice} />
-          </button>
-        ))}
+      <div className="mt-4">
+        <QuestionAnswerInput
+          questionType={question.questionType}
+          choices={question.choices}
+          value={answers[question.id] ?? null}
+          onChange={answerQuestion}
+          disabled={timeExpired || submitting}
+        />
       </div>
 
       <div className="mt-4 flex justify-end">

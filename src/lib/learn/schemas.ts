@@ -12,7 +12,7 @@ import { z } from "zod";
 import { PASSWORD_MAX, PASSWORD_MIN } from "@/lib/auth/schemas";
 import type { Difficulty } from "./types";
 
-const choiceField = z.number().int().min(0).max(3);
+const answerField = z.string().trim().min(1).max(100);
 
 export const ReportQuestionSchema = z.object({
   requestId: z.uuid(),
@@ -25,7 +25,7 @@ export const ReportQuestionSchema = z.object({
 
 export const SubmitQuestionSchema = z.object({
   questionId: z.uuid(),
-  choice: choiceField,
+  answer: answerField,
   /**
    * The question bank sitting this attempt belongs to, or null when there is
    * none (the session call failed, or the player was mounted before one
@@ -66,7 +66,7 @@ export const SubmitPracticeSchema = z.object({
    * most a few dozen questions, so anything larger is not a real submission.
    */
   answers: z
-    .array(z.object({ questionId: z.uuid(), choice: choiceField }))
+    .array(z.object({ questionId: z.uuid(), answer: answerField }))
     .max(60),
 });
 
@@ -92,7 +92,7 @@ export const TestAttemptSchema = z.object({
 export const SavePracticeTestResponseSchema = z.object({
   attemptId: z.uuid(),
   questionId: z.uuid(),
-  choice: choiceField,
+  answer: z.string().max(100),
 });
 
 /**

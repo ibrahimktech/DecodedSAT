@@ -5,7 +5,7 @@
  * literal dollar sign written as `\$`. The migration in
  * `20260820100000_math_latex.sql` is what puts content into that shape;
  * everything authored afterwards is expected to arrive that way already (the
- * admin upload help text says so).
+ * shared admin editor says so).
  *
  * Free of React and of `katex` on purpose: the splitter is pure string work,
  * so it can be unit-reasoned about, reused by the plain-text helper below,

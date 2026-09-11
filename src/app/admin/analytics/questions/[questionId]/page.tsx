@@ -25,7 +25,7 @@ export default async function AnalyticsQuestionPage({ params }: { params: Promis
 
   const { data: richQuestion } = await supabase
     .from("admin_questions")
-    .select("content_blocks")
+    .select("content_blocks, question_type, spr_answers")
     .eq("id", parsed.data)
     .maybeSingle();
 
@@ -34,6 +34,26 @@ export default async function AnalyticsQuestionPage({ params }: { params: Promis
   const distribution = (data.answerDistribution ?? []) as Record<string, unknown>[];
   const effectiveness = data.effectiveness as Record<string, unknown>;
   const choices = Array.isArray(question.choices) ? question.choices.map(String) : [];
+  const questionType = richQuestion?.question_type === "student_produced_response"
+    ? "student_produced_response"
+    : "multiple_choice";
+  const acceptedAnswers = Array.isArray(richQuestion?.spr_answers)
+    ? richQuestion.spr_answers.map(String)
+    : [];
+  const { data: sprDistributionData } = questionType === "student_produced_response"
+    ? await supabase.rpc("admin_spr_answer_distribution", {
+        p_question_id: parsed.data,
+      })
+    : { data: null };
+  const sprDistribution = (sprDistributionData ?? []) as Array<{
+    answer: string;
+    is_correct: boolean;
+    answer_count: number;
+  }>;
+  const sprTotal = sprDistribution.reduce(
+    (total, row) => total + Number(row.answer_count),
+    0,
+  );
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -48,7 +68,49 @@ export default async function AnalyticsQuestionPage({ params }: { params: Promis
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-hairline bg-surface p-5"><h2 className="font-display text-xl font-bold text-ink">Answer-choice distribution</h2>{distribution.length === 0 ? <EmptyState text="No submitted answers yet." /> : <div className="mt-4 space-y-3">{distribution.map((row) => { const choice = Number(row.choice); const percent = Number(row.percent || 0); return <div key={choice}><div className="mb-1 flex justify-between gap-3 text-sm"><span className={row.isCorrect ? "font-bold text-accent" : "text-ink"}>{String.fromCharCode(65 + choice)}. {choices[choice] ?? ""}{row.isCorrect ? " · correct" : ""}</span><span className="font-semibold tabular-nums">{percent}% ({formatNumber(row.count)})</span></div><div className="h-2 overflow-hidden rounded-full bg-background"><div className={row.isCorrect ? "h-full bg-accent" : "h-full bg-muted/40"} style={{ width: `${Math.min(100, percent)}%` }} /></div></div>; })}</div>}</section>
+        <section className="rounded-2xl border border-hairline bg-surface p-5">
+          <h2 className="font-display text-xl font-bold text-ink">
+            {questionType === "multiple_choice"
+              ? "Answer-choice distribution"
+              : "Entered-answer distribution"}
+          </h2>
+          {questionType === "student_produced_response" && acceptedAnswers.length > 0 && (
+            <p className="mt-1 text-sm text-muted">
+              Accepted: {acceptedAnswers.join(" or ")}
+            </p>
+          )}
+          {(questionType === "multiple_choice" ? distribution : sprDistribution).length === 0 ? (
+            <EmptyState text="No submitted answers yet." />
+          ) : questionType === "multiple_choice" ? (
+            <div className="mt-4 space-y-3">
+              {distribution.map((row) => {
+                const choice = Number(row.choice);
+                const percent = Number(row.percent || 0);
+                return <div key={choice}><div className="mb-1 flex justify-between gap-3 text-sm"><span className={row.isCorrect ? "font-bold text-accent" : "text-ink"}>{String.fromCharCode(65 + choice)}. {choices[choice] ?? ""}{row.isCorrect ? " · correct" : ""}</span><span className="font-semibold tabular-nums">{percent}% ({formatNumber(row.count)})</span></div><div className="h-2 overflow-hidden rounded-full bg-background"><div className={row.isCorrect ? "h-full bg-accent" : "h-full bg-muted/40"} style={{ width: `${Math.min(100, percent)}%` }} /></div></div>;
+              })}
+            </div>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {sprDistribution.map((row) => {
+                const count = Number(row.answer_count);
+                const percent = sprTotal > 0 ? Math.round((count / sprTotal) * 100) : 0;
+                return (
+                  <div key={`${row.answer}-${row.is_correct}`}>
+                    <div className="mb-1 flex justify-between gap-3 text-sm">
+                      <span className={row.is_correct ? "font-bold text-accent" : "text-ink"}>
+                        {row.answer}{row.is_correct ? " · correct" : ""}
+                      </span>
+                      <span className="font-semibold tabular-nums">{percent}% ({formatNumber(count)})</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-background">
+                      <div className={row.is_correct ? "h-full bg-accent" : "h-full bg-muted/40"} style={{ width: `${Math.min(100, percent)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         <section className="rounded-2xl border border-hairline bg-surface p-5"><h2 className="font-display text-xl font-bold text-ink">Explanation follow-through</h2><p className="mt-1 text-sm leading-relaxed text-muted">Observational comparison only. These numbers describe what students did later; they do not prove that the video caused an improvement.</p><dl className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-background p-3"><dt className="text-xs text-muted">Incorrect students who watched</dt><dd className="mt-1 font-display text-xl font-bold text-ink">{formatPercent(effectiveness.watchRate)}</dd></div><div className="rounded-xl bg-background p-3"><dt className="text-xs text-muted">Watchers who completed</dt><dd className="mt-1 font-display text-xl font-bold text-ink">{formatPercent(effectiveness.completionRate)}</dd></div><div className="rounded-xl bg-background p-3"><dt className="text-xs text-muted">Later skill accuracy · watched</dt><dd className="mt-1 font-display text-xl font-bold text-ink">{formatPercent(effectiveness.watchedLaterAccuracy)}</dd><p className="text-xs text-muted">{formatNumber(effectiveness.watchedLaterAttempts)} attempts</p></div><div className="rounded-xl bg-background p-3"><dt className="text-xs text-muted">Later skill accuracy · did not watch</dt><dd className="mt-1 font-display text-xl font-bold text-ink">{formatPercent(effectiveness.comparisonLaterAccuracy)}</dd><p className="text-xs text-muted">{formatNumber(effectiveness.comparisonLaterAttempts)} attempts</p></div><div className="col-span-2 rounded-xl bg-background p-3"><dt className="text-xs text-muted">Students who later retried this question correctly</dt><dd className="mt-1 font-display text-xl font-bold text-ink">{formatNumber(effectiveness.successfulRetries)}</dd></div></dl></section>
       </div>

@@ -17,6 +17,7 @@ import {
   DIFFICULTY_LABELS,
   QUESTION_REPORT_REASON_LABELS,
 } from "@/lib/learn/types";
+import type { QuestionType } from "@/lib/questions/answers";
 
 export const metadata: Metadata = {
   title: "Review Question Report",
@@ -52,6 +53,11 @@ export default async function QuestionReportDetailPage({
     JSON.stringify(report.snapshot.contentBlocks) !==
       JSON.stringify(report.currentQuestion.contentBlocks) ||
     report.snapshot.correctChoice !== report.currentQuestion.correctChoice ||
+    report.snapshot.questionType !== report.currentQuestion.questionType ||
+    report.snapshot.sprAnswerMode !== report.currentQuestion.sprAnswerMode ||
+    JSON.stringify(report.snapshot.sprAnswers) !==
+      JSON.stringify(report.currentQuestion.sprAnswers) ||
+    report.snapshot.sprTolerance !== report.currentQuestion.sprTolerance ||
     JSON.stringify(report.snapshot.choices) !==
       JSON.stringify(report.currentQuestion.choices);
 
@@ -151,6 +157,9 @@ export default async function QuestionReportDetailPage({
               contentBlocks={report.currentQuestion.contentBlocks}
               choices={report.currentQuestion.choices}
               correctChoice={report.currentQuestion.correctChoice}
+              questionType={report.currentQuestion.questionType}
+              sprAnswers={report.currentQuestion.sprAnswers}
+              sprTolerance={report.currentQuestion.sprTolerance}
               explanation={report.currentQuestion.explanation}
             />
 
@@ -187,6 +196,9 @@ export default async function QuestionReportDetailPage({
               contentBlocks={report.snapshot.contentBlocks}
               choices={report.snapshot.choices}
               correctChoice={report.snapshot.correctChoice}
+              questionType={report.snapshot.questionType}
+              sprAnswers={report.snapshot.sprAnswers}
+              sprTolerance={report.snapshot.sprTolerance}
             />
           </section>
 
@@ -222,12 +234,18 @@ function QuestionContent({
   contentBlocks,
   choices,
   correctChoice,
+  questionType,
+  sprAnswers,
+  sprTolerance,
   explanation,
 }: {
   prompt: string;
   contentBlocks: import("@/lib/questions/content").QuestionContentBlock[] | null;
   choices: string[];
-  correctChoice: number;
+  correctChoice: number | null;
+  questionType: QuestionType;
+  sprAnswers: string[];
+  sprTolerance: string | null;
   explanation?: string;
 }) {
   return (
@@ -237,8 +255,9 @@ function QuestionContent({
         contentBlocks={contentBlocks}
         textClassName="font-question text-[0.9375rem] leading-relaxed text-ink"
       />
-      <ol className="mt-4 flex flex-col gap-2">
-        {choices.map((choice, index) => (
+      {questionType === "multiple_choice" ? (
+        <ol className="mt-4 flex flex-col gap-2">
+          {choices.map((choice, index) => (
           <li
             key={index}
             className={`flex gap-3 rounded-xl border px-3 py-2.5 text-[0.9375rem] ${
@@ -257,8 +276,15 @@ function QuestionContent({
               </span>
             )}
           </li>
-        ))}
-      </ol>
+          ))}
+        </ol>
+      ) : (
+        <div className="mt-4 rounded-xl border border-accent bg-accent-chip px-4 py-3 text-[0.9375rem] text-ink">
+          <span className="font-semibold text-accent">Accepted answer{sprAnswers.length === 1 ? "" : "s"}: </span>
+          {sprAnswers.join(", ")}
+          {sprTolerance && ` (± ${sprTolerance})`}
+        </div>
+      )}
       {explanation && (
         <div className="mt-4 rounded-xl bg-background p-4">
           <h3 className="text-sm font-semibold text-muted">Explanation</h3>

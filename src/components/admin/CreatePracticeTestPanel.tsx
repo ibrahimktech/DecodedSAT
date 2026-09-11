@@ -4,7 +4,7 @@
  * Step 1 of building a practice test: its front matter.
  *
  * A plain form post — the action redirects to the new test's page, where the
- * questions get uploaded. Two steps rather than one because the test row has
+ * questions are authored. Two steps rather than one because the test row has
  * to exist before 44 questions can be attached to it.
  *
  * Timing is not on this form. It is locked to the real digital SAT (35 minutes
@@ -43,7 +43,7 @@ export function CreatePracticeTestPanel() {
       <p className="mt-1 text-sm text-muted">
         Timing is fixed to the real digital SAT: {MODULE_MINUTES} minutes for{" "}
         {MODULE_QUESTION_COUNT} questions per module. A full test is two
-        modules, a half is one. You&apos;ll upload the questions on the next
+        modules, a half is one. You&apos;ll add the questions on the next
         screen.
       </p>
 

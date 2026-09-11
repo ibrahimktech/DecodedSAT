@@ -103,9 +103,9 @@ cascade;
 -- admin list will show each one as "Needs questions", and students cannot
 -- start one (the runner has nothing to serve).
 --
--- Keep them if you plan to re-upload questions into the same tests — the
--- upload replaces a test's questions in place, so the test id, its title and
--- its URL all survive.
+-- Keep them if you plan to recreate questions in the same tests — the
+-- manual authoring preserves the test id, its title, and its URL while you
+-- add fresh content.
 --
 -- Uncomment to delete them instead and start from nothing.
 -- ============================================================================
@@ -128,7 +128,6 @@ cascade;
 --   union all select 'subtopics', count(*) from public.subtopics
 --   union all select 'videos',    count(*) from public.videos;
 --
--- Then upload fresh content at /admin/questions and /admin/practice-tests.
--- Author it per `sample-structure.json`: LaTeX between $...$, \frac not /,
--- \sqrt not sqrt(), \pi not pi, \cdot not *. Nothing converts it for you.
+-- Then author fresh content at /admin/questions and /admin/practice-tests.
+-- Use the rich-content controls for text, display math, images, and tables.
 -- ============================================================================

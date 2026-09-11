@@ -19,12 +19,14 @@ import {
   type QuestionReportReason,
 } from "@/lib/learn/types";
 import type { QuestionContentBlock } from "@/lib/questions/content";
+import type { QuestionType } from "@/lib/questions/answers";
 
 export type ReportableQuestion = {
   id: string;
   prompt: string;
   contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
+  questionType: QuestionType;
 };
 
 type ReportQuestionButtonProps = {
@@ -106,6 +108,7 @@ export function ReportQuestionButton({
         ? structuredClone(question.contentBlocks)
         : null,
       choices: [...question.choices],
+      questionType: question.questionType,
     });
     setReportedLabel(questionLabel);
     setRequestId(crypto.randomUUID());
@@ -308,8 +311,9 @@ export function ReportQuestionButton({
                     contentBlocks={reportedQuestion.contentBlocks}
                     textClassName="font-question text-base leading-7 text-ink"
                   />
-                  <ol className="mt-3 flex flex-col gap-1.5">
-                    {reportedQuestion.choices.map((choice, index) => (
+                  {reportedQuestion.questionType === "multiple_choice" ? (
+                    <ol className="mt-3 flex flex-col gap-1.5">
+                      {reportedQuestion.choices.map((choice, index) => (
                       <li
                         key={index}
                         className="flex gap-2 font-question text-base leading-7 text-muted"
@@ -319,8 +323,13 @@ export function ReportQuestionButton({
                         </span>
                         <MathText text={choice} />
                       </li>
-                    ))}
-                  </ol>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="mt-3 rounded-lg border border-hairline bg-surface px-3 py-2 text-sm text-muted">
+                      Student-produced response · enter an integer, decimal, or fraction.
+                    </p>
+                  )}
                 </section>
 
                 <fieldset className="mt-5">

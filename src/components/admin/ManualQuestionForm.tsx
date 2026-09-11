@@ -3,13 +3,17 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
+import { createPracticeTestQuestionAction } from "@/app/admin/practice-tests/actions";
 import { createQuestionAction } from "@/app/admin/questions/actions";
 import {
   QuestionFormFields,
   type QuestionDraft,
   type QuestionFieldErrors,
 } from "@/components/admin/QuestionFormFields";
-import { CreateQuestionSchema } from "@/lib/admin/schemas";
+import {
+  CreatePracticeTestQuestionSchema,
+  CreateQuestionSchema,
+} from "@/lib/admin/schemas";
 import type { AdminVideoOption, QuestionSetOption } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
 import { legacyPromptToBlocks } from "@/lib/questions/content";
@@ -33,20 +37,30 @@ export function ManualQuestionForm({
   subtopics,
   questionSets,
   videos,
+  practiceTest,
 }: {
   domains: Domain[];
   subtopics: Subtopic[];
   questionSets: QuestionSetOption[];
   videos: AdminVideoOption[];
+  practiceTest?: {
+    id: string;
+    moduleCount: number;
+    module1Count: number;
+    module2Count: number;
+  };
 }) {
   const router = useRouter();
-  const [questionId] = useState(() => crypto.randomUUID());
   const firstDomain = domains[0]?.id ?? "";
-  const [draft, setDraft] = useState<QuestionDraft>({
+  const makeDraft = (): QuestionDraft => ({
     prompt: "",
     contentBlocks: legacyPromptToBlocks(""),
+    questionType: "multiple_choice",
     choices: ["", "", "", ""],
     correctChoice: -1,
+    sprAnswerMode: null,
+    sprAnswers: [],
+    sprTolerance: null,
     explanation: "",
     difficulty: "medium",
     domainId: firstDomain,
@@ -54,9 +68,12 @@ export function ManualQuestionForm({
       subtopics.find((subtopic) => subtopic.domainId === firstDomain)?.id ?? "",
     solutionVideoId: null,
   });
+  const [questionId, setQuestionId] = useState(() => crypto.randomUUID());
+  const [draft, setDraft] = useState<QuestionDraft>(makeDraft);
   const [questionSetId, setQuestionSetId] = useState("");
   const [externalId, setExternalId] = useState("");
   const [isActive, setIsActive] = useState(true);
+  const [moduleNumber, setModuleNumber] = useState<1 | 2>(1);
   const [errors, setErrors] = useState<QuestionFieldErrors>({});
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -72,16 +89,23 @@ export function ManualQuestionForm({
       subtopicId: draft.subtopicId,
       prompt: draft.prompt,
       contentBlocks: draft.contentBlocks,
+      questionType: draft.questionType,
       choices: draft.choices,
       correctChoice: draft.correctChoice,
+      sprAnswerMode: draft.sprAnswerMode,
+      sprAnswers: draft.sprAnswers,
+      sprTolerance: draft.sprTolerance,
       explanation: draft.explanation,
       difficulty: draft.difficulty,
       solutionVideoId: draft.solutionVideoId,
-      questionSetId,
-      externalId,
+      ...(practiceTest
+        ? { testId: practiceTest.id, moduleNumber }
+        : { questionSetId, externalId }),
       isActive,
     };
-    const parsed = CreateQuestionSchema.safeParse(input);
+    const parsed = practiceTest
+      ? CreatePracticeTestQuestionSchema.safeParse(input)
+      : CreateQuestionSchema.safeParse(input);
     if (!parsed.success) {
       setErrors(issueMap(parsed.error.issues));
       setMessage("Check the highlighted fields and try again.");
@@ -92,8 +116,19 @@ export function ManualQuestionForm({
     submittingRef.current = true;
     startTransition(async () => {
       try {
-        const result = await createQuestionAction(input);
+        const result = practiceTest
+          ? await createPracticeTestQuestionAction(input)
+          : await createQuestionAction(input);
         if (result.status === "ok") {
+          if (practiceTest) {
+            submittingRef.current = false;
+            setQuestionId(crypto.randomUUID());
+            setDraft(makeDraft());
+            setErrors({});
+            setMessage("Question added to the end of the module.");
+            router.refresh();
+            return;
+          }
           const status = isActive ? "active" : "inactive";
           router.push(
             `/admin/questions?id=${encodeURIComponent(result.id)}&status=${status}&created=1`,
@@ -139,6 +174,25 @@ export function ManualQuestionForm({
             if (value.correctChoice !== draft.correctChoice) {
               delete next.correctChoice;
             }
+            if (value.questionType !== draft.questionType) {
+              delete next.questionType;
+              delete next.correctChoice;
+              delete next.sprAnswerMode;
+              delete next.sprAnswers;
+              delete next.sprTolerance;
+            }
+            if (value.sprAnswerMode !== draft.sprAnswerMode) {
+              delete next.sprAnswerMode;
+            }
+            if (value.sprTolerance !== draft.sprTolerance) {
+              delete next.sprTolerance;
+            }
+            value.sprAnswers.forEach((answer, index) => {
+              if (answer !== draft.sprAnswers[index]) {
+                delete next.sprAnswers;
+                delete next[`sprAnswers.${index}`];
+              }
+            });
             if (value.solutionVideoId !== draft.solutionVideoId) {
               delete next.solutionVideoId;
             }
@@ -160,13 +214,35 @@ export function ManualQuestionForm({
       <section className="grid gap-4 border-b border-hairline py-6 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.72fr)] lg:gap-6">
         <div>
           <h2 className="font-display text-xl font-bold text-ink">
-            Additional metadata
+            {practiceTest ? "Test placement" : "Additional metadata"}
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Question-set identity is optional. If you use it, both values are
-            required so imports can continue to detect duplicates correctly.
+            {practiceTest
+              ? "Choose the module. New questions are appended and can be reordered below."
+              : "Question-set identity is optional. If you use it, both values are required."}
           </p>
 
+          {practiceTest ? (
+            <label className="mt-4 flex max-w-xs flex-col gap-1 text-sm font-medium text-muted">
+              Module
+              <select
+                value={moduleNumber}
+                onChange={(event) =>
+                  setModuleNumber(Number(event.target.value) as 1 | 2)
+                }
+                className={FIELD_CLASS}
+              >
+                <option value={1}>
+                  Module 1 ({practiceTest.module1Count}/22)
+                </option>
+                {practiceTest.moduleCount === 2 && (
+                  <option value={2}>
+                    Module 2 ({practiceTest.module2Count}/22)
+                  </option>
+                )}
+              </select>
+            </label>
+          ) : (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm font-medium text-muted">
               Question set (optional)
@@ -240,9 +316,19 @@ export function ManualQuestionForm({
               )}
             </label>
           </div>
+          )}
         </div>
 
         <div className="self-start rounded-xl border border-hairline bg-background p-4">
+          {practiceTest ? (
+            <p className="text-[0.9375rem] text-ink">
+              <strong className="block font-semibold">Active</strong>
+              <span className="mt-0.5 block text-sm text-muted">
+                Practice Test questions are created active so a complete module
+                cannot contain a hidden question.
+              </span>
+            </p>
+          ) : (
           <label className="flex items-start gap-3 text-[0.9375rem] text-ink">
             <input
               type="checkbox"
@@ -261,6 +347,7 @@ export function ManualQuestionForm({
               </span>
             </span>
           </label>
+          )}
         </div>
       </section>
 
@@ -275,7 +362,7 @@ export function ManualQuestionForm({
 
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
         <Link
-          href="/admin/questions"
+          href={practiceTest ? "/admin/practice-tests" : "/admin/questions"}
           className="rounded-xl border border-hairline px-5 py-2.5 text-[0.9375rem] font-semibold text-muted transition-colors hover:bg-background hover:text-ink"
         >
           Cancel
@@ -285,7 +372,11 @@ export function ManualQuestionForm({
           disabled={pending || draft.subtopicId === ""}
           className="rounded-xl bg-accent px-5 py-2.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          {pending ? "Creating…" : "Create Question"}
+          {pending
+            ? "Creating…"
+            : practiceTest
+              ? "Add to Module"
+              : "Create Question"}
         </button>
       </div>
     </form>

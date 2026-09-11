@@ -52,9 +52,9 @@ import {
   CalculatorPanel,
   CalculatorToggle,
 } from "@/components/app/CalculatorPanel";
+import { QuestionAnswerInput } from "@/components/app/QuestionAnswerInput";
 import { QuestionContent } from "@/components/app/QuestionContent";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
-import { ChoiceList } from "@/components/app/exam/ChoiceList";
 import { ExamShell, examButtonClassName } from "@/components/app/exam/ExamShell";
 import { ExamTimer } from "@/components/app/exam/ExamTimer";
 import { ExitButton } from "@/components/app/exam/ExitButton";
@@ -70,17 +70,18 @@ import { ANALYTICS_THRESHOLDS } from "@/lib/analytics/constants";
 import { useExamFlags } from "@/lib/learn/exam-flags";
 import type { RunnerState } from "@/lib/learn/tests";
 import { formatSeconds, MODULE_SECONDS } from "@/lib/learn/types";
+import { hasAnswer, isValidNumericAnswer } from "@/lib/questions/answers";
 
 /** How long to sit on a selection before writing it. */
 const AUTOSAVE_DELAY_MS = 400;
 const analyticsTimestamp = () => Date.now();
 
-type SaveState = "saving" | "saved" | "failed";
+type SaveState = "saving" | "saved" | "failed" | "invalid";
 
 export function PracticeTestRunner({ state }: { state: RunnerState }) {
   const router = useRouter();
 
-  const [answers, setAnswers] = useState<Record<string, number>>(state.answers);
+  const [answers, setAnswers] = useState<Record<string, string>>(state.answers);
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
   const [index, setIndex] = useState(0);
   // Seeded from the server's own count so the first paint is identical on
@@ -101,6 +102,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
 
   /** One pending autosave per question; a re-selection replaces its own. */
   const saveTimers = useRef(new Map<string, number>());
+  const pendingAnswers = useRef(new Map<string, string>());
   /** Ends the module exactly once, however many ways it gets triggered. */
   const endingRef = useRef(false);
   const trackedAnswersRef = useRef(new Set<string>());
@@ -111,14 +113,14 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
 
   const question = state.questions[index];
   const answeredCount = state.questions.filter(
-    (item) => answers[item.id] !== undefined,
+    (item) => hasAnswer(answers[item.id]),
   ).length;
 
   const recordCurrentExit = useCallback(() => {
     if (
       state.phase !== "module" ||
       !question ||
-      answers[question.id] !== undefined ||
+      hasAnswer(answers[question.id]) ||
       currentExitTrackedRef.current
     ) return;
     currentExitTrackedRef.current = true;
@@ -135,6 +137,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
     if (eventName) {
       trackStudentEvent(eventName, {
         question_id: question.id,
+        question_type: question.questionType,
         practice_session_id: state.attemptId,
         answer_time_ms: answerTimeMs,
         source: "practice_test",
@@ -167,13 +170,104 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
     }
     trackStudentEvent("question_viewed", {
       question_id: question.id,
+      question_type: question.questionType,
       practice_session_id: state.attemptId,
       source: "practice_test",
     });
   }, [question, state.attemptId, state.phase]);
 
+  const persistAnswer = useCallback(
+    async (
+      questionId: string,
+      answer: string,
+      omitInvalidAnswer = false,
+    ): Promise<boolean> => {
+      const savedQuestion = state.questions.find((item) => item.id === questionId);
+      if (
+        savedQuestion?.questionType === "student_produced_response" &&
+        hasAnswer(answer) &&
+        !isValidNumericAnswer(answer)
+      ) {
+        // Clear any older valid autosave so a half-typed replacement can
+        // never be scored as the previous answer. Manual submission remains
+        // blocked; at time expiry the malformed token counts as unanswered.
+        const cleared = await savePracticeTestResponseAction({
+          attemptId: state.attemptId,
+          questionId,
+          answer: "",
+        });
+        if (
+          omitInvalidAnswer &&
+          cleared.status === "ok" &&
+          pendingAnswers.current.get(questionId) === answer
+        ) {
+          pendingAnswers.current.delete(questionId);
+        }
+        setSaveStates((current) => ({
+          ...current,
+          [questionId]: cleared.status === "ok" ? "invalid" : "failed",
+        }));
+        return omitInvalidAnswer && cleared.status === "ok";
+      }
+
+      const result = await savePracticeTestResponseAction({
+        attemptId: state.attemptId,
+        questionId,
+        answer,
+      });
+      if (pendingAnswers.current.get(questionId) === answer) {
+        pendingAnswers.current.delete(questionId);
+      }
+      setSaveStates((current) => ({
+        ...current,
+        [questionId]: result.status === "ok" ? "saved" : "failed",
+      }));
+
+      if (
+        result.status === "ok" &&
+        hasAnswer(answer) &&
+        !trackedAnswersRef.current.has(questionId)
+      ) {
+        trackedAnswersRef.current.add(questionId);
+        const answerTimeMs = Math.min(
+          Math.max(
+            0,
+            Date.now() - (firstViewedAtRef.current.get(questionId) ?? Date.now()),
+          ),
+          7_200_000,
+        );
+        trackStudentEvent("question_answered", {
+          question_id: questionId,
+          practice_session_id: state.attemptId,
+          ...(savedQuestion?.questionType === "multiple_choice"
+            ? { selected_choice: Number(answer) }
+            : {}),
+          question_type: savedQuestion?.questionType,
+          answer_time_ms: answerTimeMs,
+          used_desmos: desmosUsedIdsRef.current.has(questionId),
+          source: "practice_test",
+        });
+        if (
+          answerTimeMs >=
+          ANALYTICS_THRESHOLDS.struggleLongAnswerSeconds * 1_000
+        ) {
+          trackStudentEvent("question_struggled", {
+            question_id: questionId,
+            practice_session_id: state.attemptId,
+            question_type: savedQuestion?.questionType,
+            answer_time_ms: answerTimeMs,
+            used_desmos: desmosUsedIdsRef.current.has(questionId),
+            source: "explainable_time_heuristic",
+          });
+        }
+      }
+      return result.status === "ok";
+    },
+    [state.attemptId, state.questions],
+  );
+
   // --- Ending the module ----------------------------------------------------
-  const endModule = useCallback(async () => {
+  const endModule = useCallback(async (omitInvalidAnswers = false) => {
     if (endingRef.current) return;
     endingRef.current = true;
     setBusy(true);
@@ -186,6 +280,18 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
       window.clearTimeout(timer);
     }
     saveTimers.current.clear();
+
+    const pendingResults = await Promise.all(
+      [...pendingAnswers.current.entries()].map(([questionId, answer]) =>
+        persistAnswer(questionId, answer, omitInvalidAnswers),
+      ),
+    );
+    if (pendingResults.some((saved) => !saved)) {
+      endingRef.current = false;
+      setBusy(false);
+      setMessage("Fix or retry the unsaved answers before submitting.");
+      return;
+    }
 
     const result = await submitPracticeTestModuleAction({
       attemptId: state.attemptId,
@@ -209,7 +315,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
       // 2's questions and deadline, all come from there.
       router.refresh();
     }
-  }, [recordCurrentExit, router, state.attemptId]);
+  }, [persistAnswer, recordCurrentExit, router, state.attemptId]);
 
   // --- The countdown --------------------------------------------------------
   // Stays here, not in `ExamTimer`. The tick is what decides a module is over,
@@ -223,7 +329,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
     const tick = () => {
       const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
       setRemaining(left);
-      if (left === 0) void endModule();
+      if (left === 0) void endModule(true);
     };
 
     tick();
@@ -259,9 +365,10 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
   }, [recordCurrentExit, state.phase]);
 
   // --- Autosave -------------------------------------------------------------
-  const select = (questionId: string, choice: number) => {
-    setAnswers((current) => ({ ...current, [questionId]: choice }));
+  const select = (questionId: string, answer: string) => {
+    setAnswers((current) => ({ ...current, [questionId]: answer }));
     setSaveStates((current) => ({ ...current, [questionId]: "saving" }));
+    pendingAnswers.current.set(questionId, answer);
 
     const existing = saveTimers.current.get(questionId);
     if (existing !== undefined) window.clearTimeout(existing);
@@ -270,46 +377,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
       questionId,
       window.setTimeout(async () => {
         saveTimers.current.delete(questionId);
-        const result = await savePracticeTestResponseAction({
-          attemptId: state.attemptId,
-          questionId,
-          choice,
-        });
-        setSaveStates((current) => ({
-          ...current,
-          [questionId]: result.status === "ok" ? "saved" : "failed",
-        }));
-        if (result.status === "ok" && !trackedAnswersRef.current.has(questionId)) {
-          trackedAnswersRef.current.add(questionId);
-          const answerTimeMs = Math.min(
-            Math.max(
-              0,
-              Date.now() -
-                (firstViewedAtRef.current.get(questionId) ?? Date.now()),
-            ),
-            7_200_000,
-          );
-          trackStudentEvent("question_answered", {
-            question_id: questionId,
-            practice_session_id: state.attemptId,
-            selected_choice: choice,
-            answer_time_ms: answerTimeMs,
-            used_desmos: desmosUsedIdsRef.current.has(questionId),
-            source: "practice_test",
-          });
-          if (
-            answerTimeMs >=
-            ANALYTICS_THRESHOLDS.struggleLongAnswerSeconds * 1_000
-          ) {
-            trackStudentEvent("question_struggled", {
-              question_id: questionId,
-              practice_session_id: state.attemptId,
-              answer_time_ms: answerTimeMs,
-              used_desmos: desmosUsedIdsRef.current.has(questionId),
-              source: "explainable_time_heuristic",
-            });
-          }
-        }
+        await persistAnswer(questionId, answer);
       }, AUTOSAVE_DELAY_MS),
     );
   };
@@ -417,7 +485,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
       state:
         itemIndex === index
           ? "current"
-          : answers[item.id] !== undefined
+          : hasAnswer(answers[item.id])
             ? "answered"
             : "unanswered",
       marked: flags.isMarked(item.id),
@@ -471,6 +539,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
                   if (firstUse) {
                     trackStudentEvent("desmos_opened", {
                       question_id: question.id,
+                      question_type: question.questionType,
                       practice_session_id: state.attemptId,
                       source: "practice_test",
                     });
@@ -541,6 +610,7 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
         onToggleEliminating={() =>
           setEliminating((wasEliminating) => !wasEliminating)
         }
+        showEliminate={question.questionType === "multiple_choice"}
       />
 
       <QuestionContent
@@ -550,13 +620,15 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
       />
 
       <div className="mt-6">
-        <ChoiceList
+        <QuestionAnswerInput
+          questionType={question.questionType}
           choices={question.choices}
-          selected={answers[question.id] ?? null}
-          onSelect={(choice) => select(question.id, choice)}
+          value={answers[question.id] ?? null}
+          onChange={(answer) => select(question.id, answer)}
           crossed={flags.crossedFor(question.id)}
           onToggleCross={(choice) => flags.toggleCross(question.id, choice)}
           eliminating={eliminating}
+          disabled={busy || remaining <= 0}
         />
       </div>
 
@@ -584,6 +656,15 @@ export function PracticeTestRunner({ state }: { state: RunnerState }) {
         >
           That answer didn&apos;t save. Pick it again — if it keeps failing,
           your answers so far are still recorded.
+        </p>
+      )}
+
+      {saveStates[question.id] === "invalid" && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-miss-hairline bg-miss-surface px-4 py-3 text-sm text-miss-ink"
+        >
+          Enter an integer, decimal, or fraction with a nonzero denominator.
         </p>
       )}
 

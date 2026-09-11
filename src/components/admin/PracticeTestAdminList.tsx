@@ -4,7 +4,7 @@
  * The admin practice test list, with soft delete/restore inline.
  *
  * Editing lives on each test's own page rather than expanding in place — a
- * test's page is also where its questions are uploaded, and splitting those
+ * test's page is also where its questions are authored, and splitting those
  * across two surfaces would mean two places to check whether a test is
  * actually ready.
  *
@@ -28,7 +28,7 @@ export function PracticeTestAdminList({
   if (tests.length === 0) {
     return (
       <div className="rounded-2xl border border-hairline bg-surface px-6 py-10 text-center text-[0.9375rem] text-muted">
-        No practice tests yet. Create one above, then upload its questions.
+        No practice tests yet. Create one above, then add its questions.
       </div>
     );
   }
@@ -49,8 +49,8 @@ function TestRow({ test }: { test: AdminPracticeTest }) {
 
   const expectedPerModule = MODULE_QUESTION_COUNT;
   const ready =
-    test.module1Count === expectedPerModule &&
-    (test.moduleCount === 1 || test.module2Count === expectedPerModule);
+    test.module1ActiveCount === expectedPerModule &&
+    (test.moduleCount === 1 || test.module2ActiveCount === expectedPerModule);
 
   const toggleActive = () => {
     setMessage(null);
@@ -106,10 +106,14 @@ function TestRow({ test }: { test: AdminPracticeTest }) {
 
           <p className="mt-2 text-sm text-muted">
             Module 1: {test.module1Count}/{expectedPerModule}
+            {test.module1ActiveCount !== test.module1Count &&
+              ` (${test.module1ActiveCount} active)`}
             {test.moduleCount === 2 && (
               <>
                 {" "}
                 · Module 2: {test.module2Count}/{expectedPerModule}
+                {test.module2ActiveCount !== test.module2Count &&
+                  ` (${test.module2ActiveCount} active)`}
               </>
             )}{" "}
             · {test.attemptCount} attempt{test.attemptCount === 1 ? "" : "s"}

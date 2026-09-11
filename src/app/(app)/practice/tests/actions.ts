@@ -10,7 +10,7 @@
  * client sends is stored, and no action here can be talked into scoring an
  * attempt the caller does not own.
  *
- * The client sends: an attempt id, a question id, a choice index. That is the
+ * The client sends: an attempt id, a question id, and an answer. That is the
  * whole vocabulary.
  */
 
@@ -149,7 +149,7 @@ export async function savePracticeTestResponseAction(
       {
         p_attempt_id: parsed.data.attemptId,
         p_question_id: parsed.data.questionId,
-        p_choice: parsed.data.choice,
+        p_answer: parsed.data.answer,
       },
     );
 

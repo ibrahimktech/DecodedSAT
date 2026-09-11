@@ -3,98 +3,24 @@
  *
  * Same doctrine as the auth and learning schemas: whatever a client sends is
  * parsed against these on the server before it is used, and anything that
- * does not match is rejected outright — never repaired. The upload schema is
- * additionally re-validated field by field inside the database function, so
- * even a call that reaches the RPC directly meets the same wall.
+ * does not match is rejected outright — never repaired. The database write
+ * functions independently enforce the same answer invariants.
  *
- * Free of server-only imports so the upload panel can reuse the payload
- * schema for pre-submit feedback (UX only — the server re-parses).
+ * Free of server-only imports so the shared question editor can use the same
+ * payload contract for immediate feedback (UX only — the server re-parses).
  */
 
 import { z } from "zod";
+import { QuestionContentBlocksSchema } from "@/lib/questions/content";
 import {
-  QuestionContentBlocksSchema,
-  contentBlocksToLegacyPrompt,
-} from "@/lib/questions/content";
-
-export const CHOICE_LABELS = ["A", "B", "C", "D"] as const;
+  isNonnegativeNumericAnswer,
+  normalizeNumericAnswer,
+} from "@/lib/questions/answers";
 
 const DifficultyEnum = z.enum(["easy", "medium", "hard"]);
 
 /** Required text, trimmed, with an explicit ceiling. */
 const contentText = (max: number) => z.string().trim().min(1).max(max);
-
-// --- JSON upload ---------------------------------------------------------------
-
-const UploadChoiceSchema = z.object({
-  label: z.enum(CHOICE_LABELS),
-  text: contentText(1000),
-});
-
-const UploadQuestionBaseSchema = z.object({
-  external_id: contentText(64),
-  domain: contentText(100),
-  subtopic: contentText(120),
-  prompt: contentText(4000).optional(),
-  question_text: contentText(4000).optional(),
-  content_blocks: QuestionContentBlocksSchema.optional(),
-  // Exactly four choices labelled exactly A–D (order in the file is
-  // irrelevant; storage orders by label). `correct_answer` matching a label
-  // follows automatically: with the full A–D set required, every enum value
-  // is a label.
-  choices: z
-    .array(UploadChoiceSchema)
-    .length(4)
-    .refine(
-      (choices) => new Set(choices.map((choice) => choice.label)).size === 4,
-      { message: "Choice labels must be exactly A, B, C and D." },
-    ),
-  correct_answer: z.enum(CHOICE_LABELS),
-  explanation: contentText(4000),
-  difficulty: DifficultyEnum,
-});
-
-function validateUploadedQuestionContent(
-  value: z.infer<typeof UploadQuestionBaseSchema>,
-  context: z.RefinementCtx,
-) {
-  if (!value.prompt && !value.question_text && !value.content_blocks) {
-    context.addIssue({
-      code: "custom",
-      path: ["prompt"],
-      message: "Provide prompt, question_text, or content_blocks.",
-    });
-  }
-}
-
-function normalizeUploadedQuestion<
-  Value extends z.infer<typeof UploadQuestionBaseSchema>,
->(value: Value) {
-  const { question_text: questionText, ...rest } = value;
-  return {
-    ...rest,
-    prompt:
-      value.prompt ??
-      questionText ??
-      contentBlocksToLegacyPrompt(value.content_blocks ?? []),
-  };
-}
-
-export const UploadQuestionSchema = UploadQuestionBaseSchema
-  .superRefine(validateUploadedQuestionContent)
-  .transform(normalizeUploadedQuestion);
-
-export const UploadPayloadSchema = z.object({
-  set_name: contentText(120),
-  set_description: z.string().trim().max(500).optional(),
-  create_new_subtopics: z.boolean().optional().default(false),
-  questions: z.array(UploadQuestionSchema).min(1).max(500),
-});
-
-export type UploadPayload = z.infer<typeof UploadPayloadSchema>;
-
-/** Upload files above this are refused before parsing. */
-export const UPLOAD_MAX_BYTES = 1_000_000;
 
 // --- Question create / edit ------------------------------------------------------
 
@@ -103,7 +29,7 @@ export const UPLOAD_MAX_BYTES = 1_000_000;
  * single contract means the new authoring flow cannot drift from the editor or
  * from the shape the player already renders.
  */
-export const QuestionFieldsSchema = z.object({
+const SharedQuestionFieldsSchema = z.object({
   subtopicId: z
     .string()
     .trim()
@@ -115,20 +41,6 @@ export const QuestionFieldsSchema = z.object({
     .min(1, "Enter the question prompt.")
     .max(4000, "Use 4,000 characters or fewer."),
   contentBlocks: QuestionContentBlocksSchema.nullable().optional(),
-  choices: z
-    .array(
-      z
-        .string()
-        .trim()
-        .min(1, "Enter the answer choice.")
-        .max(1000, "Use 1,000 characters or fewer."),
-    )
-    .length(4, "Enter exactly four answer choices."),
-  correctChoice: z
-    .number()
-    .int()
-    .min(0, "Select the correct answer.")
-    .max(3, "Select the correct answer."),
   explanation: z
     .string()
     .trim()
@@ -140,23 +52,109 @@ export const QuestionFieldsSchema = z.object({
   solutionVideoId: z.uuid().nullable().optional(),
 });
 
-export const EditQuestionSchema = QuestionFieldsSchema.extend({
-  id: z.uuid(),
+const choiceText = z
+  .string()
+  .trim()
+  .min(1, "Enter the answer choice.")
+  .max(1000, "Use 1,000 characters or fewer.");
+
+const numericAnswer = z
+  .string()
+  .trim()
+  .min(1, "Enter a numeric answer.")
+  .max(100, "Use 100 characters or fewer.")
+  .refine((value) => normalizeNumericAnswer(value) !== null, {
+    message: "Use an integer, decimal, or fraction with a nonzero denominator.",
+  });
+
+const MultipleChoiceQuestionFieldsSchema = SharedQuestionFieldsSchema.extend({
+  questionType: z.literal("multiple_choice"),
+  choices: z.array(choiceText).length(4, "Enter exactly four answer choices."),
+  correctChoice: z.number().int().min(0).max(3),
+  sprAnswerMode: z.null(),
+  sprAnswers: z.array(z.string()).max(0),
+  sprTolerance: z.null(),
 });
+
+const StudentProducedResponseFieldsSchema = SharedQuestionFieldsSchema.extend({
+  questionType: z.literal("student_produced_response"),
+  choices: z.array(z.string()).max(0),
+  correctChoice: z.null(),
+  sprAnswerMode: z.enum(["exact", "tolerance", "multiple"]),
+  sprAnswers: z.array(numericAnswer).min(1).max(10),
+  sprTolerance: z.string().nullable(),
+});
+
+export const QuestionFieldsSchema = z.discriminatedUnion("questionType", [
+  MultipleChoiceQuestionFieldsSchema,
+  StudentProducedResponseFieldsSchema,
+]).superRefine((value, context) => {
+  if (value.questionType !== "student_produced_response") return;
+
+  const normalized = value.sprAnswers
+    .map(normalizeNumericAnswer)
+    .filter((answer): answer is string => answer !== null);
+
+  if (value.sprAnswerMode === "multiple") {
+    if (normalized.length < 2) {
+      context.addIssue({
+        code: "custom",
+        path: ["sprAnswers"],
+        message: "Enter at least two accepted values.",
+      });
+    } else if (new Set(normalized).size !== normalized.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["sprAnswers"],
+        message: "Accepted values must be mathematically distinct.",
+      });
+    }
+  } else if (value.sprAnswers.length !== 1) {
+    context.addIssue({
+      code: "custom",
+      path: ["sprAnswers"],
+      message: "Enter one correct value for this answer mode.",
+    });
+  }
+
+  if (value.sprAnswerMode === "tolerance") {
+    if (
+      value.sprTolerance === null ||
+      !isNonnegativeNumericAnswer(value.sprTolerance)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["sprTolerance"],
+        message: "Enter a non-negative numeric tolerance.",
+      });
+    }
+  } else if (value.sprTolerance !== null) {
+    context.addIssue({
+      code: "custom",
+      path: ["sprTolerance"],
+      message: "Tolerance is only available in tolerance mode.",
+    });
+  }
+});
+
+export const EditQuestionSchema = z.intersection(
+  QuestionFieldsSchema,
+  z.object({ id: z.uuid() }),
+);
 
 /**
  * Question-set identity is optional for hand-authored questions, but it is a
  * pair when present: `externalId` is only unique and meaningful inside a set.
  */
-export const CreateQuestionSchema = QuestionFieldsSchema.extend({
-  id: z.uuid().optional(),
-  questionSetId: z.union([z.uuid(), z.literal("")]),
-  externalId: z
-    .string()
-    .trim()
-    .max(64, "Use 64 characters or fewer."),
-  isActive: z.boolean(),
-}).superRefine((value, context) => {
+export const CreateQuestionSchema = z.intersection(
+  QuestionFieldsSchema,
+  z.object({
+    id: z.uuid().optional(),
+    questionSetId: z.union([z.uuid(), z.literal("")]),
+    externalId: z.string().trim().max(64, "Use 64 characters or fewer."),
+    isActive: z.boolean(),
+  }),
+).superRefine((value, context) => {
   if (value.questionSetId !== "" && value.externalId === "") {
     context.addIssue({
       code: "custom",
@@ -172,6 +170,26 @@ export const CreateQuestionSchema = QuestionFieldsSchema.extend({
     });
   }
 });
+
+export const CreatePracticeTestQuestionSchema = z.intersection(
+  QuestionFieldsSchema,
+  z.object({
+    id: z.uuid().optional(),
+    testId: z.uuid(),
+    moduleNumber: z.union([z.literal(1), z.literal(2)]),
+    isActive: z.boolean(),
+  }),
+);
+
+export const PracticeTestQuestionMutationSchema = z.object({
+  testId: z.uuid(),
+  questionId: z.uuid(),
+});
+
+export const MovePracticeTestQuestionSchema =
+  PracticeTestQuestionMutationSchema.extend({
+    direction: z.enum(["up", "down"]),
+  });
 
 /** Soft delete / restore — for questions and videos both. */
 export const SetActiveSchema = z.object({
@@ -396,33 +414,6 @@ export const EditPracticeTestSchema = z.object({
   difficulty: DifficultyEnum,
 });
 
-/**
- * One practice-test question: the step 5 upload shape plus `module_number`.
- *
- * Reusing `UploadQuestionSchema` verbatim is the point — the same JSON a
- * question set takes, with one field added, so there is one authoring format
- * to learn and one validator to keep correct.
- */
-export const UploadTestQuestionSchema = UploadQuestionBaseSchema
-  .extend({
-    module_number: z.union([z.literal(1), z.literal(2)]),
-  })
-  .superRefine(validateUploadedQuestionContent)
-  .transform(normalizeUploadedQuestion);
-
-export const UploadTestPayloadSchema = z.object({
-  create_new_subtopics: z.boolean().optional().default(false),
-  /**
-   * A full test is 44 questions and a half is 22. The ceiling is generous so
-   * a miscounted file is rejected by the database's exact per-module check
-   * with a "found N, expected 22" message, rather than by a Zod length error
-   * that says nothing about which module is short.
-   */
-  questions: z.array(UploadTestQuestionSchema).min(1).max(100),
-});
-
-export type UploadTestPayload = z.infer<typeof UploadTestPayloadSchema>;
-
 // --- List filters (URL query params) ----------------------------------------------
 // Read-only filters: an invalid value is dropped (no filter), not an error
 // someone could link to. Matches the student pages' filter doctrine.
@@ -440,6 +431,10 @@ export const AdminQuestionFiltersSchema = z.object({
   subtopic: uuidParam,
   set: uuidParam,
   difficulty: DifficultyEnum.optional().catch(undefined),
+  type: z
+    .enum(["multiple_choice", "student_produced_response"])
+    .optional()
+    .catch(undefined),
   status: statusParam,
   review: z
     .enum(["needs-review", "uncategorized"])

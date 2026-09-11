@@ -18,6 +18,9 @@ const EventProperties = z
     practice_session_id: Uuid.optional(),
     correct: z.boolean().optional(),
     selected_choice: z.number().int().min(0).max(3).optional(),
+    question_type: z
+      .enum(["multiple_choice", "student_produced_response"])
+      .optional(),
     answer_time_ms: z.number().int().min(0).max(7_200_000).optional(),
     progress_percent: z.number().int().min(0).max(100).optional(),
     watched_seconds: z.number().int().min(0).max(86_400).optional(),

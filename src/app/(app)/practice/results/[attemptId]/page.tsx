@@ -5,10 +5,11 @@ import { z } from "zod";
 import { ctaClassName } from "@/components/CtaButton";
 import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
 import { MathText } from "@/components/app/MathText";
+import { QuestionAnswerReview } from "@/components/app/QuestionAnswerReview";
 import { QuestionContent } from "@/components/app/QuestionContent";
 import { requireUser } from "@/lib/auth/require-user";
 import { getPracticeResults } from "@/lib/learn/data";
-import { CHOICE_LETTERS, formatSeconds } from "@/lib/learn/types";
+import { formatSeconds } from "@/lib/learn/types";
 
 export const metadata: Metadata = {
   title: "Section results",
@@ -35,7 +36,7 @@ export default async function PracticeResultsPage({
   if (!results) notFound();
 
   const missed = results.items.filter((item) => item.isCorrect === false);
-  const unanswered = results.items.filter((item) => item.selectedChoice === null);
+  const unanswered = results.items.filter((item) => item.selectedAnswer === null);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -74,7 +75,7 @@ export default async function PracticeResultsPage({
         <ol className="mt-4 flex flex-col gap-4">
           {results.items.map((item) => {
             const wasCorrect = item.isCorrect === true;
-            const wasAnswered = item.selectedChoice !== null;
+            const wasAnswered = item.selectedAnswer !== null;
 
             return (
               <li
@@ -113,39 +114,15 @@ export default async function PracticeResultsPage({
                   textClassName="font-question text-base leading-7 text-ink"
                 />
 
-                <ul className="mt-3 flex flex-col gap-1.5">
-                  {item.choices.map((choice, choiceIndex) => {
-                    const isYours = item.selectedChoice === choiceIndex;
-                    const isRight = item.correctChoice === choiceIndex;
-                    return (
-                      <li
-                        key={choiceIndex}
-                        className={`flex items-center gap-3 rounded-lg border px-3.5 py-2.5 font-question text-[1.0625rem] leading-7 ${
-                          isRight
-                            ? "border-accent bg-accent-chip text-ink"
-                            : isYours
-                              ? "border-miss-hairline bg-miss-surface text-miss-ink"
-                              : "border-transparent text-muted"
-                        }`}
-                      >
-                        <span className="font-question font-bold">
-                          {CHOICE_LETTERS[choiceIndex]}
-                        </span>
-                        <MathText text={choice} />
-                        {isRight && (
-                          <span className="ml-auto text-xs font-semibold text-accent">
-                            correct answer
-                          </span>
-                        )}
-                        {isYours && !isRight && (
-                          <span className="ml-auto text-xs font-semibold">
-                            your answer
-                          </span>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                <QuestionAnswerReview
+                  questionType={item.questionType}
+                  choices={item.choices}
+                  selectedAnswer={item.selectedAnswer}
+                  selectedChoice={item.selectedChoice}
+                  correctChoice={item.correctChoice}
+                  correctAnswers={item.correctAnswers}
+                  correctAnswerTolerance={item.correctAnswerTolerance}
+                />
 
                 {item.solutionVideo ? (
                   <SolutionVideoLink

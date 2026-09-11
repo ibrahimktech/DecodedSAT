@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { QuestionAdminList } from "@/components/admin/QuestionAdminList";
-import { UploadQuestionsPanel } from "@/components/admin/UploadQuestionsPanel";
 import {
   listAdminQuestions,
   listAdminVideoOptions,
@@ -11,15 +10,16 @@ import { AdminQuestionFiltersSchema } from "@/lib/admin/schemas";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getDomains, getSubtopics } from "@/lib/learn/data";
 import { DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/learn/types";
+import { QUESTION_TYPE_LABELS } from "@/lib/questions/answers";
 
 export const metadata: Metadata = {
   title: "Questions",
 };
 
 /**
- * The content pipeline's home: bulk JSON upload at the top, then the full
- * question list — answer key included — filterable by domain, subtopic, set,
- * difficulty, active state, and prompt text.
+ * The content pipeline's home: the full question list — answer key included —
+ * filterable by domain, subtopic, set, type, difficulty, active state, and
+ * prompt text.
  *
  * Filters are a plain GET form: server-rendered, shareable URLs, no client
  * state to desync. Invalid filter values are dropped by the schema.
@@ -41,6 +41,7 @@ export default async function AdminQuestionsPage({
     subtopic: single("subtopic"),
     set: single("set"),
     difficulty: single("difficulty"),
+    type: single("type"),
     status: single("status"),
     review: single("review"),
     q: single("q"),
@@ -98,8 +99,6 @@ export default async function AdminQuestionsPage({
         </div>
       )}
 
-      <UploadQuestionsPanel />
-
       <section aria-label="Filters" className="mt-8">
         <form
           method="get"
@@ -151,6 +150,15 @@ export default async function AdminQuestionsPage({
             {DIFFICULTIES.map((difficulty) => (
               <option key={difficulty} value={difficulty}>
                 {DIFFICULTY_LABELS[difficulty]}
+              </option>
+            ))}
+          </FilterSelect>
+
+          <FilterSelect label="Type" name="type" value={filters.type}>
+            <option value="">All types</option>
+            {Object.entries(QUESTION_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </FilterSelect>

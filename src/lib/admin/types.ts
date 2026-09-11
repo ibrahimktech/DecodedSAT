@@ -1,14 +1,18 @@
 /**
  * Shared shapes for the admin panel.
  *
- * Imported by both Server Components and client components (the upload panel,
- * the inline editors), so this module must stay free of server-only imports —
+ * Imported by both Server Components and client components (the shared form
+ * and inline editors), so this module must stay free of server-only imports —
  * types and constants only.
  */
 
 import type { Difficulty } from "@/lib/learn/types";
 import type { QuestionReportReason } from "@/lib/learn/types";
 import type { QuestionContentBlock } from "@/lib/questions/content";
+import type {
+  QuestionType,
+  SprAnswerMode,
+} from "@/lib/questions/answers";
 
 /** A question as the admin sees it — answer key included. */
 export type AdminQuestion = {
@@ -16,7 +20,11 @@ export type AdminQuestion = {
   prompt: string;
   contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
-  correctChoice: number;
+  correctChoice: number | null;
+  questionType: QuestionType;
+  sprAnswerMode: SprAnswerMode | null;
+  sprAnswers: string[];
+  sprTolerance: string | null;
   explanation: string;
   difficulty: Difficulty;
   isActive: boolean;
@@ -85,7 +93,11 @@ export type QuestionReportSnapshot = {
   prompt: string;
   contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
-  correctChoice: number;
+  correctChoice: number | null;
+  questionType: QuestionType;
+  sprAnswerMode: SprAnswerMode | null;
+  sprAnswers: string[];
+  sprTolerance: string | null;
 };
 
 export type AdminQuestionReport = AdminQuestionReportSummary & {
@@ -159,23 +171,16 @@ export type AdminPracticeTest = {
   createdAt: string;
   module1Count: number;
   module2Count: number;
+  module1ActiveCount: number;
+  module2ActiveCount: number;
   attemptCount: number;
 };
 
-/**
- * The practice-test upload's form state.
- *
- * Unlike the question-set upload, which rejects bad ROWS and imports the rest,
- * this is all-or-nothing: a test with 21 questions in module 1 is not a test.
- * So the failure shape is a list of reasons and an import that did not happen.
- */
-export type TestUploadState =
-  | { status: "idle" }
-  | { status: "error" | "rate_limited"; message: string }
-  | { status: "rejected"; errors: string[] }
-  | { status: "ok"; imported: number; reused: number; linked: number };
-
-export const initialTestUploadState: TestUploadState = { status: "idle" };
+export type AdminPracticeTestQuestion = AdminQuestion & {
+  practiceTestId: string;
+  moduleNumber: 1 | 2;
+  orderIndex: number;
+};
 
 export type AdminUserRow = {
   id: string;
@@ -226,19 +231,6 @@ export type CreateQuestionResult =
 export type QuestionAssetActionResult =
   | { status: "ok"; storagePath: string }
   | { status: "error" | "rate_limited"; message: string };
-
-/** The upload action's form state, rendered as the import summary. */
-export type UploadState =
-  | { status: "idle" }
-  | { status: "error" | "rate_limited"; message: string }
-  | {
-      status: "ok";
-      imported: number;
-      skippedDuplicates: number;
-      rejected: { externalId: string; reason: string }[];
-    };
-
-export const initialUploadState: UploadState = { status: "idle" };
 
 /** What the YouTube lookup action returns to the add/edit video forms. */
 export type VideoLookupResult =

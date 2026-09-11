@@ -28,6 +28,7 @@ import {
   parseQuestionContentBlocks,
   type QuestionContentBlock,
 } from "@/lib/questions/content";
+import type { QuestionType } from "@/lib/questions/answers";
 
 function logQueryError(label: string, error: unknown): void {
   console.error(`[tests] ${label} failed: ${describeError(error)}`);
@@ -36,6 +37,13 @@ function logQueryError(label: string, error: unknown): void {
 function toChoices(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((choice) => String(choice));
+}
+
+function hasPlayableAnswerShape(
+  questionType: QuestionType,
+  choices: string[],
+): boolean {
+  return questionType === "student_produced_response" || choices.length === 4;
 }
 
 export type TestType = "full" | "half";
@@ -249,8 +257,8 @@ export type RunnerState = {
    */
   remainingSeconds: number;
   questions: PracticeQuestion[];
-  /** Question id → chosen index, from whatever autosaved. */
-  answers: Record<string, number>;
+  /** Question id → entered answer, from whatever autosaved. */
+  answers: Record<string, string>;
 };
 
 /**
@@ -349,7 +357,7 @@ export async function getRunnerState(
   const [questionsResult, responsesResult] = await Promise.all([
     supabase
       .from("practice_test_questions")
-      .select("order_index, questions!inner(id, prompt, content_blocks, choices)")
+      .select("order_index, questions!inner(id, prompt, content_blocks, choices, question_type)")
       .eq("practice_test_id", row.practice_test_id)
       .eq("module_number", moduleNumber)
       .order("order_index"),
@@ -374,6 +382,7 @@ export async function getRunnerState(
       prompt: string;
       content_blocks: unknown;
       choices: unknown;
+      question_type: QuestionType;
     };
   }>)
     .map((entry) => ({
@@ -381,20 +390,19 @@ export async function getRunnerState(
       prompt: entry.questions.prompt,
       contentBlocks: parseQuestionContentBlocks(entry.questions.content_blocks),
       choices: toChoices(entry.questions.choices),
+      questionType: entry.questions.question_type,
     }))
-    .filter((question) => question.choices.length === 4);
+    .filter((question) =>
+      hasPlayableAnswerShape(question.questionType, question.choices),
+    );
 
-  const answers: Record<string, number> = {};
+  const answers: Record<string, string> = {};
   for (const response of (responsesResult.data ?? []) as Array<{
     question_id: string;
     student_answer: string | null;
   }>) {
-    // `student_answer` is text so a future grid-in fits the same column. For
-    // a four-choice question it holds the index; anything else is ignored
-    // rather than coerced into a wrong selection.
-    const parsed = Number.parseInt(response.student_answer ?? "", 10);
-    if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 3) {
-      answers[response.question_id] = parsed;
+    if (typeof response.student_answer === "string") {
+      answers[response.question_id] = response.student_answer;
     }
   }
 
@@ -421,9 +429,13 @@ export type TestReviewItem = {
   prompt: string;
   contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
+  questionType: QuestionType;
+  selectedAnswer: string | null;
   selectedChoice: number | null;
   isCorrect: boolean | null;
   correctChoice: number | null;
+  correctAnswers: string[];
+  correctAnswerTolerance: string | null;
   explanation: string | null;
   subtopicName: string;
   subtopicSlug: string;
@@ -489,7 +501,7 @@ export async function getPracticeTestReview(
     supabase
       .from("practice_test_questions")
       .select(
-        "module_number, order_index, questions!inner(id, prompt, content_blocks, choices, subtopics!inner(id, name, slug))",
+        "module_number, order_index, questions!inner(id, prompt, content_blocks, choices, question_type, subtopics!inner(id, name, slug))",
       )
       .eq("practice_test_id", row.practice_test_id)
       .order("module_number")
@@ -516,6 +528,7 @@ export async function getPracticeTestReview(
       prompt: string;
       content_blocks: unknown;
       choices: unknown;
+      question_type: QuestionType;
       subtopics: { id: string; name: string; slug: string };
     };
   }>;
@@ -529,7 +542,7 @@ export async function getPracticeTestReview(
     supabase
       .from("attempted_question_solutions")
       .select(
-        "question_id, correct_choice, explanation, solution_video_id, solution_video_title",
+        "question_id, question_type, correct_choice, correct_answers, correct_answer_tolerance, explanation, solution_video_id, solution_video_title",
       )
       .in("question_id", questionIds),
     supabase
@@ -546,7 +559,7 @@ export async function getPracticeTestReview(
 
   const responses = new Map<
     string,
-    { selected: number | null; isCorrect: boolean | null }
+    { answer: string | null; selected: number | null; isCorrect: boolean | null }
   >();
   for (const response of (responsesResult.data ?? []) as Array<{
     question_id: string;
@@ -555,6 +568,7 @@ export async function getPracticeTestReview(
   }>) {
     const parsed = Number.parseInt(response.student_answer ?? "", 10);
     responses.set(response.question_id, {
+      answer: response.student_answer,
       selected:
         Number.isInteger(parsed) && parsed >= 0 && parsed <= 3 ? parsed : null,
       isCorrect: response.is_correct,
@@ -564,7 +578,10 @@ export async function getPracticeTestReview(
   const solutions = new Map<
     string,
     {
-      correct_choice: number;
+      question_type: QuestionType;
+      correct_choice: number | null;
+      correct_answers: string[] | null;
+      correct_answer_tolerance: string | null;
       explanation: string;
       solution_video_id: string | null;
       solution_video_title: string | null;
@@ -572,7 +589,10 @@ export async function getPracticeTestReview(
   >();
   for (const solution of (solutionsResult.data ?? []) as Array<{
     question_id: string;
-    correct_choice: number;
+    question_type: QuestionType;
+    correct_choice: number | null;
+    correct_answers: string[] | null;
+    correct_answer_tolerance: string | null;
     explanation: string;
     solution_video_id: string | null;
     solution_video_title: string | null;
@@ -611,12 +631,16 @@ export async function getPracticeTestReview(
           entry.questions.content_blocks,
         ),
         choices: toChoices(entry.questions.choices),
+        questionType: entry.questions.question_type,
+        selectedAnswer: response?.answer ?? null,
         selectedChoice: response?.selected ?? null,
         // A question never answered has no response row at all — that is
         // "unanswered", which the review shows as its own state rather than
         // as a wrong answer with no selection.
         isCorrect: response?.isCorrect ?? null,
         correctChoice: solution?.correct_choice ?? null,
+        correctAnswers: solution?.correct_answers ?? [],
+        correctAnswerTolerance: solution?.correct_answer_tolerance ?? null,
         explanation: solution?.explanation ?? null,
         subtopicName: entry.questions.subtopics.name,
         subtopicSlug: entry.questions.subtopics.slug,

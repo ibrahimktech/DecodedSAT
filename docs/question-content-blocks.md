@@ -47,12 +47,11 @@ KaTeX display mode. Arbitrary HTML is not a block type and is never rendered.
 TypeScript/Zod validation lives in `src/lib/questions/content.ts`; a matching
 PostgreSQL check function and constraint provide a second persistence boundary.
 
-## JSON imports
+## Authoring
 
-The existing `prompt` key remains supported. `question_text` is accepted as an
-alias. `content_blocks` is optional, and a fallback prompt is derived when a
-rich import provides neither text key. Practice-test imports accept the same
-blocks plus their existing `module_number` field.
+The shared admin question editor writes these blocks for both Question Bank
+and Practice Test questions. It also derives the searchable fallback prompt,
+so both creation paths keep the same rendering and validation behavior.
 
 The normal way to add an image is the admin block editor. It uploads through a
 server action into the `question-assets` bucket, never through a service-role
@@ -63,6 +62,6 @@ that already exists in that bucket.
 
 Admin uploads use `questions/{question-id}/{asset-uuid}.{ext}`. PNG, JPEG, and
 WebP are accepted up to 5 MB after extension, MIME, and file-signature checks.
-SVG is intentionally unsupported. Replaced/removed persisted images are deleted
+SVG is intentionally unsupported. Replaced or removed persisted images are deleted
 after save only when the database confirms no other question references them.
 Soft-deactivating a question retains its figures so restoring it is safe.

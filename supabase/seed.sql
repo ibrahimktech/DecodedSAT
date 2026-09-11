@@ -10,7 +10,7 @@
 -- fixed structure of SAT math. The placeholder questions, videos and practice
 -- sections that used to live here were wiped by `wipe-step5-content.sql` and
 -- must not come back via a seed re-run: real questions arrive through the
--- admin panel's JSON upload, real videos through /admin/videos.
+-- admin question editor, real videos through /admin/videos.
 --
 -- Content ids are hand-written UUIDs with a readable scheme:
 --
@@ -34,7 +34,7 @@ on conflict (id) do update
 
 -- --- Subtopics ---------------------------------------------------------------
 -- `subtopics` is the compatibility table name for the fixed student-facing
--- skills. Admin imports resolve legacy names but do not create extra skills.
+-- skills. Admin question editors select from these fixed canonical skills.
 
 insert into public.subtopics (id, domain_id, slug, name, position) values
   ('20000000-0000-4000-8000-000000000011', '10000000-0000-4000-8000-000000000001', 'solving-linear-equations',               'Solving linear equations',                  1),

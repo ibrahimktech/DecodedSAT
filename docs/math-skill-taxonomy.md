@@ -10,8 +10,8 @@ Student- and admin-facing copy now calls these rows **skills**.
 
 The migration reuses all 12 original skill UUIDs for their nearest canonical
 replacement and adds 7 UUIDs. Old slugs are stored in
-`subtopic_slug_aliases`, and the application also canonicalizes old bookmark
-and JSON-import values.
+`subtopic_slug_aliases`, and the application canonicalizes old bookmark
+values.
 
 ## Canonical taxonomy
 

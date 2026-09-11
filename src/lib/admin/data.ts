@@ -20,6 +20,7 @@ import type { Difficulty } from "@/lib/learn/types";
 import { parseQuestionContentBlocks } from "@/lib/questions/content";
 import type {
   AdminPracticeTest,
+  AdminPracticeTestQuestion,
   AdminPopup,
   AdminQuestion,
   AdminQuestionReport,
@@ -30,6 +31,10 @@ import type {
   AdminVideoOption,
   QuestionSetOption,
 } from "./types";
+import type {
+  QuestionType,
+  SprAnswerMode,
+} from "@/lib/questions/answers";
 import type {
   AdminQuestionFilters,
   AdminQuestionReportFilters,
@@ -44,6 +49,11 @@ function logQueryError(label: string, error: unknown): void {
 function toChoices(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((choice) => String(choice));
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
 }
 
 /**
@@ -132,7 +142,8 @@ export async function listAdminQuestions(
         "domain_name, question_set_id, set_name, solution_video_id, " +
         "solution_video_title, solution_video_is_active, subtopic_active, " +
         "skill_review_confidence, skill_review_reason, skill_review_status, " +
-        "old_subtopic_name, suggested_subtopic_id",
+        "old_subtopic_name, suggested_subtopic_id, question_type, " +
+        "spr_answer_mode, spr_answers, spr_tolerance",
     )
     .order("domain_name")
     .order("subtopic_name")
@@ -151,6 +162,7 @@ export async function listAdminQuestions(
   }
   if (filters.set) query = query.eq("question_set_id", filters.set);
   if (filters.difficulty) query = query.eq("difficulty", filters.difficulty);
+  if (filters.type) query = query.eq("question_type", filters.type);
   if (filters.review === "needs-review") {
     query = query.eq("skill_review_status", "pending");
   } else if (filters.review === "uncategorized") {
@@ -171,7 +183,7 @@ export async function listAdminQuestions(
     prompt: string;
     content_blocks: unknown;
     choices: unknown;
-    correct_choice: number;
+    correct_choice: number | null;
     explanation: string;
     difficulty: Difficulty;
     is_active: boolean;
@@ -189,6 +201,10 @@ export async function listAdminQuestions(
     skill_review_status: "applied" | "pending" | "accepted" | "changed" | null;
     old_subtopic_name: string | null;
     suggested_subtopic_id: string | null;
+    question_type: QuestionType;
+    spr_answer_mode: SprAnswerMode | null;
+    spr_answers: unknown;
+    spr_tolerance: string | null;
   }>)
     .map((row) => ({
       id: row.id,
@@ -196,6 +212,10 @@ export async function listAdminQuestions(
       contentBlocks: parseQuestionContentBlocks(row.content_blocks),
       choices: toChoices(row.choices),
       correctChoice: row.correct_choice,
+      questionType: row.question_type,
+      sprAnswerMode: row.spr_answer_mode,
+      sprAnswers: toStringArray(row.spr_answers),
+      sprTolerance: row.spr_tolerance,
       explanation: row.explanation,
       difficulty: row.difficulty,
       isActive: row.is_active,
@@ -226,8 +246,7 @@ export async function listAdminQuestions(
               suggestedSkillId: row.suggested_subtopic_id,
             }
           : null,
-    }))
-    .filter((question) => question.choices.length === 4);
+    }));
 }
 
 // --- Question reports -------------------------------------------------------
@@ -322,6 +341,7 @@ export async function getAdminQuestionReport(
         ", user_id, updated_at, admin_note, reviewed_at, reviewed_by, " +
         "reviewer_name, question_snapshot, current_choices, " +
         "current_correct_choice, current_explanation, current_difficulty, current_content_blocks, " +
+        "current_question_type, current_spr_answer_mode, current_spr_answers, current_spr_tolerance, " +
         "subtopic_id, subtopic_name, domain_id, domain_name, set_name",
     )
     .eq("id", reportId)
@@ -345,9 +365,17 @@ export async function getAdminQuestionReport(
       content_blocks?: unknown;
       choices?: unknown;
       correct_choice?: unknown;
+      question_type?: unknown;
+      spr_answer_mode?: unknown;
+      spr_answers?: unknown;
+      spr_tolerance?: unknown;
     };
     current_choices: unknown;
-    current_correct_choice: number;
+    current_correct_choice: number | null;
+    current_question_type: QuestionType;
+    current_spr_answer_mode: SprAnswerMode | null;
+    current_spr_answers: unknown;
+    current_spr_tolerance: string | null;
     current_explanation: string;
     current_difficulty: Difficulty;
     current_content_blocks: unknown;
@@ -360,11 +388,17 @@ export async function getAdminQuestionReport(
 
   const snapshotChoices = toChoices(row.question_snapshot.choices);
   const currentChoices = toChoices(row.current_choices);
+  const snapshotType = row.question_snapshot.question_type as QuestionType;
+  const snapshotSprAnswers = toStringArray(row.question_snapshot.spr_answers);
   if (
     typeof row.question_snapshot.prompt !== "string" ||
-    !Number.isInteger(row.question_snapshot.correct_choice) ||
-    snapshotChoices.length !== 4 ||
-    currentChoices.length !== 4
+    !["multiple_choice", "student_produced_response"].includes(snapshotType) ||
+    (snapshotType === "multiple_choice" &&
+      (!Number.isInteger(row.question_snapshot.correct_choice) ||
+        snapshotChoices.length !== 4)) ||
+    (snapshotType === "student_produced_response" &&
+      snapshotSprAnswers.length === 0) ||
+    (row.current_question_type === "multiple_choice" && currentChoices.length !== 4)
   ) {
     logQueryError("admin_question_report_shape", "invalid question snapshot");
     return null;
@@ -407,7 +441,18 @@ export async function getAdminQuestionReport(
         row.question_snapshot.content_blocks,
       ),
       choices: snapshotChoices,
-      correctChoice: Number(row.question_snapshot.correct_choice),
+      correctChoice:
+        snapshotType === "multiple_choice"
+          ? Number(row.question_snapshot.correct_choice)
+          : null,
+      questionType: snapshotType,
+      sprAnswerMode:
+        (row.question_snapshot.spr_answer_mode as SprAnswerMode | null) ?? null,
+      sprAnswers: snapshotSprAnswers,
+      sprTolerance:
+        typeof row.question_snapshot.spr_tolerance === "string"
+          ? row.question_snapshot.spr_tolerance
+          : null,
     },
     currentQuestion: {
       id: row.question_id,
@@ -415,6 +460,10 @@ export async function getAdminQuestionReport(
       contentBlocks: parseQuestionContentBlocks(row.current_content_blocks),
       choices: currentChoices,
       correctChoice: row.current_correct_choice,
+      questionType: row.current_question_type,
+      sprAnswerMode: row.current_spr_answer_mode,
+      sprAnswers: toStringArray(row.current_spr_answers),
+      sprTolerance: row.current_spr_tolerance,
       explanation: row.current_explanation,
       difficulty: row.current_difficulty,
       isActive: row.current_is_active,
@@ -648,7 +697,7 @@ export async function listAdminPopups(
     return [];
   }
 
-  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+  return ((data ?? []) as unknown as Array<Record<string, unknown>>).map((row) => ({
     id: row.id as string,
     title: row.title as string,
     message: row.message as string,
@@ -685,7 +734,7 @@ export async function listAdminPracticeTests(
   const { data, error } = await supabase
     .from("admin_practice_tests")
     .select(
-      "id, title, description, difficulty, test_type, module_count, is_active, created_at, module1_count, module2_count, attempt_count",
+      "id, title, description, difficulty, test_type, module_count, is_active, created_at, module1_count, module2_count, attempt_count, module1_active_count, module2_active_count",
     )
     .order("created_at", { ascending: false });
 
@@ -705,6 +754,8 @@ export async function listAdminPracticeTests(
     createdAt: row.created_at as string,
     module1Count: Number(row.module1_count ?? 0),
     module2Count: Number(row.module2_count ?? 0),
+    module1ActiveCount: Number(row.module1_active_count ?? 0),
+    module2ActiveCount: Number(row.module2_active_count ?? 0),
     attemptCount: Number(row.attempt_count ?? 0),
   }));
 }
@@ -715,6 +766,83 @@ export async function getAdminPracticeTest(
 ): Promise<AdminPracticeTest | null> {
   const tests = await listAdminPracticeTests(supabase);
   return tests.find((test) => test.id === testId) ?? null;
+}
+
+export async function listAdminPracticeTestQuestions(
+  supabase: SupabaseClient,
+  testId: string,
+): Promise<AdminPracticeTestQuestion[]> {
+  const { data, error } = await supabase
+    .from("admin_practice_test_questions")
+    .select(
+      "practice_test_id, module_number, order_index, id, prompt, content_blocks, " +
+        "choices, correct_choice, explanation, difficulty, is_active, external_id, " +
+        "subtopic_id, subtopic_name, domain_id, domain_name, set_name, " +
+        "solution_video_id, solution_video_title, solution_video_is_active, " +
+        "skill_review_confidence, skill_review_reason, skill_review_status, " +
+        "old_subtopic_name, suggested_subtopic_id, question_type, " +
+        "spr_answer_mode, spr_answers, spr_tolerance",
+    )
+    .eq("practice_test_id", testId)
+    .order("module_number")
+    .order("order_index");
+
+  if (error) {
+    logQueryError("admin_practice_test_questions", error);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as Array<Record<string, unknown>>).map((row) => ({
+    practiceTestId: row.practice_test_id as string,
+    moduleNumber: Number(row.module_number) as 1 | 2,
+    orderIndex: Number(row.order_index),
+    id: row.id as string,
+    prompt: row.prompt as string,
+    contentBlocks: parseQuestionContentBlocks(row.content_blocks),
+    choices: toChoices(row.choices),
+    correctChoice:
+      row.correct_choice === null ? null : Number(row.correct_choice),
+    questionType: row.question_type as QuestionType,
+    sprAnswerMode: (row.spr_answer_mode as SprAnswerMode | null) ?? null,
+    sprAnswers: toStringArray(row.spr_answers),
+    sprTolerance: (row.spr_tolerance as string | null) ?? null,
+    explanation: row.explanation as string,
+    difficulty: row.difficulty as Difficulty,
+    isActive: row.is_active as boolean,
+    externalId: (row.external_id as string | null) ?? null,
+    subtopicId: row.subtopic_id as string,
+    subtopicName: row.subtopic_name as string,
+    domainId: row.domain_id as string,
+    domainName: row.domain_name as string,
+    setName: (row.set_name as string | null) ?? null,
+    solutionVideo:
+      typeof row.solution_video_id === "string" &&
+      typeof row.solution_video_title === "string"
+        ? {
+            id: row.solution_video_id,
+            title: row.solution_video_title,
+            isActive: Boolean(row.solution_video_is_active),
+          }
+        : null,
+    skillReview:
+      typeof row.skill_review_confidence === "string" &&
+      typeof row.skill_review_reason === "string" &&
+      typeof row.skill_review_status === "string" &&
+      typeof row.old_subtopic_name === "string"
+        ? {
+            confidence: row.skill_review_confidence as "HIGH" | "MEDIUM" | "LOW",
+            reason: row.skill_review_reason,
+            status: row.skill_review_status as
+              | "applied"
+              | "pending"
+              | "accepted"
+              | "changed",
+            oldSkillName: row.old_subtopic_name,
+            suggestedSkillId:
+              (row.suggested_subtopic_id as string | null) ?? null,
+          }
+        : null,
+  }));
 }
 
 // --- Users -----------------------------------------------------------------------

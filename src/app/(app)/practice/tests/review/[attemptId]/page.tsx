@@ -3,12 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { MathText } from "@/components/app/MathText";
+import { QuestionAnswerReview } from "@/components/app/QuestionAnswerReview";
 import { QuestionContent } from "@/components/app/QuestionContent";
 import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
 import { CtaButton } from "@/components/CtaButton";
 import { requireUser } from "@/lib/auth/require-user";
 import { getPracticeTestReview } from "@/lib/learn/tests";
-import { CHOICE_LETTERS, formatDuration } from "@/lib/learn/types";
+import { formatDuration } from "@/lib/learn/types";
 
 export const metadata: Metadata = {
   title: "Practice test review",
@@ -120,7 +121,7 @@ export default async function PracticeTestReviewPage({
 
             <ol className="mt-3 flex flex-col gap-4">
               {items.map((item, itemIndex) => {
-                const unanswered = item.selectedChoice === null;
+                const unanswered = item.selectedAnswer === null;
 
                 return (
                   <li
@@ -164,36 +165,15 @@ export default async function PracticeTestReviewPage({
                       textClassName="font-question text-base leading-7 text-ink"
                     />
 
-                    <ul className="mt-4 flex flex-col gap-2">
-                      {item.choices.map((choice, choiceIndex) => {
-                        const isCorrectChoice =
-                          choiceIndex === item.correctChoice;
-                        const isPicked = choiceIndex === item.selectedChoice;
-
-                        return (
-                          <li
-                            key={choiceIndex}
-                            className={`flex items-center gap-3 rounded-xl border px-4 py-3 font-question text-[1.0625rem] leading-7 ${
-                              isCorrectChoice
-                                ? "border-accent bg-accent-chip text-ink"
-                                : isPicked
-                                  ? "border-miss-hairline bg-miss-surface text-miss-ink"
-                                  : "border-hairline bg-surface text-muted"
-                            }`}
-                          >
-                            <span className="font-question font-bold">
-                              {CHOICE_LETTERS[choiceIndex]}
-                            </span>
-                            <MathText text={choice} />
-                            {isPicked && (
-                              <span className="ml-auto shrink-0 text-xs font-semibold">
-                                your answer
-                              </span>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    <QuestionAnswerReview
+                      questionType={item.questionType}
+                      choices={item.choices}
+                      selectedAnswer={item.selectedAnswer}
+                      selectedChoice={item.selectedChoice}
+                      correctChoice={item.correctChoice}
+                      correctAnswers={item.correctAnswers}
+                      correctAnswerTolerance={item.correctAnswerTolerance}
+                    />
 
                     {item.solutionVideo ? (
                       <SolutionVideoLink

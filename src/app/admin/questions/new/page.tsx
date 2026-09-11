@@ -26,8 +26,8 @@ export default async function AddQuestionPage() {
             Add Question
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-            Create one question in the same format used by JSON imports and the
-            existing editor. The previews render LaTeX as students will see it.
+            Create a multiple-choice or student-produced-response question.
+            The previews render LaTeX as students will see it.
           </p>
         </div>
         <Link

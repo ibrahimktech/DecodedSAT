@@ -7,6 +7,7 @@
  */
 
 import type { QuestionContentBlock } from "@/lib/questions/content";
+import type { QuestionType } from "@/lib/questions/answers";
 
 export type Difficulty = "easy" | "medium" | "hard";
 
@@ -41,6 +42,7 @@ export type PlayableQuestion = {
   prompt: string;
   contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
+  questionType: QuestionType;
   difficulty: Difficulty;
   subtopicName: string;
   /** For the "watch the explainer" callout after a miss. */
@@ -89,7 +91,10 @@ export type QuestionVerdict =
   | {
       status: "ok";
       isCorrect: boolean;
-      correctChoice: number;
+      questionType: QuestionType;
+      correctChoice: number | null;
+      correctAnswers: string[];
+      correctAnswerTolerance: string | null;
       explanation: string;
       solutionVideo: SolutionVideo | null;
     }
@@ -102,6 +107,7 @@ export type PracticeQuestion = {
   prompt: string;
   contentBlocks: QuestionContentBlock[] | null;
   choices: string[];
+  questionType: QuestionType;
 };
 
 /** Failure result from the practice submit action (success redirects). */

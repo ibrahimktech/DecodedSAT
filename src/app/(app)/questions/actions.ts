@@ -3,7 +3,7 @@
 /**
  * Grading and session actions for the question bank.
  *
- * The client sends nothing but a question id, a choice index and the id of the
+ * The client sends nothing but a question id, an answer and the id of the
  * sitting it belongs to. The verdict, the correct answer and the explanation
  * all come back from the database's `submit_question_attempt` function, which
  * recomputes correctness against the real answer key and records the attempt
@@ -146,7 +146,7 @@ export async function submitQuestionAttemptAction(
 
     const { data, error } = await supabase.rpc("submit_question_attempt", {
       p_question_id: parsed.data.questionId,
-      p_choice: parsed.data.choice,
+      p_answer: parsed.data.answer,
       p_session_id: parsed.data.sessionId,
     });
 
@@ -159,7 +159,10 @@ export async function submitQuestionAttemptAction(
 
     const verdict = (data as Array<{
       is_correct: boolean;
-      correct_choice: number;
+      question_type: "multiple_choice" | "student_produced_response";
+      correct_choice: number | null;
+      correct_answers: string[] | null;
+      correct_answer_tolerance: string | null;
       explanation: string;
       solution_video_id: string | null;
       solution_video_title: string | null;
@@ -169,7 +172,10 @@ export async function submitQuestionAttemptAction(
     return {
       status: "ok",
       isCorrect: verdict.is_correct,
+      questionType: verdict.question_type,
       correctChoice: verdict.correct_choice,
+      correctAnswers: verdict.correct_answers ?? [],
+      correctAnswerTolerance: verdict.correct_answer_tolerance,
       explanation: verdict.explanation,
       solutionVideo:
         typeof verdict.solution_video_id === "string" &&

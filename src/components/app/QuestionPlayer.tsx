@@ -4,7 +4,7 @@
  * The question bank player.
  *
  * The player holds no answer key. It ships questions without verdicts, sends
- * the chosen index to the grading action, and renders whatever comes back —
+ * the entered answer to the grading action, and renders whatever comes back —
  * correctness, the right answer and the explanation only ever exist client-
  * side after an attempt is already recorded server-side.
  *
@@ -85,11 +85,11 @@ import {
   CalculatorToggle,
 } from "@/components/app/CalculatorPanel";
 import { MathText } from "@/components/app/MathText";
+import { QuestionAnswerInput } from "@/components/app/QuestionAnswerInput";
 import { QuestionContent } from "@/components/app/QuestionContent";
 import { ReportQuestionButton } from "@/components/app/ReportQuestionButton";
 import { Skeleton } from "@/components/app/Skeleton";
 import { SolutionVideoLink } from "@/components/app/SolutionVideoLink";
-import { ChoiceList } from "@/components/app/exam/ChoiceList";
 import { ExamShell, examButtonClassName } from "@/components/app/exam/ExamShell";
 import { ExamTimer } from "@/components/app/exam/ExamTimer";
 import { ExitButton } from "@/components/app/exam/ExitButton";
@@ -112,11 +112,12 @@ import {
   type QuestionIndexEntry,
   type QuestionVerdict,
 } from "@/lib/learn/types";
+import { hasAnswer, isValidNumericAnswer } from "@/lib/questions/answers";
 
 type OkVerdict = Extract<QuestionVerdict, { status: "ok" }>;
 
 /** What a question looks like once it has been answered and graded. */
-type AnsweredRecord = { selected: number; verdict: OkVerdict };
+type AnsweredRecord = { answer: string; verdict: OkVerdict };
 
 /** How far behind and ahead of the cursor content is kept warm. */
 const LOOK_BEHIND = 5;
@@ -216,7 +217,7 @@ export function QuestionPlayer({
     () => new Set(),
   );
   const [history, setHistory] = useState<Record<string, AnsweredRecord>>({});
-  const [selections, setSelections] = useState<Record<string, number>>({});
+  const [selections, setSelections] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [finished, setFinished] = useState(false);
@@ -250,6 +251,7 @@ export function QuestionPlayer({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const viewedQuestionRef = useRef<{
     id: string;
+    questionType: PlayableQuestion["questionType"];
     startedAt: number;
     answered: boolean;
     exitTracked: boolean;
@@ -329,6 +331,7 @@ export function QuestionPlayer({
     if (answerTimeMs >= ANALYTICS_THRESHOLDS.giveUpMinimumSeconds * 1_000) {
       trackStudentEvent("question_gave_up", {
         question_id: viewed.id,
+        question_type: viewed.questionType,
         practice_session_id: sessionRef.current ?? undefined,
         answer_time_ms: Math.min(answerTimeMs, 7_200_000),
         source: "question_bank",
@@ -339,6 +342,7 @@ export function QuestionPlayer({
     ) {
       trackStudentEvent("question_skipped", {
         question_id: viewed.id,
+        question_type: viewed.questionType,
         practice_session_id: sessionRef.current ?? undefined,
         answer_time_ms: Math.min(answerTimeMs, 7_200_000),
         source: "question_bank",
@@ -350,12 +354,14 @@ export function QuestionPlayer({
     if (!question || finished || timedOut) return;
     viewedQuestionRef.current = {
       id: question.id,
+      questionType: question.questionType,
       startedAt: Date.now(),
       answered: answeredIdsRef.current.has(question.id),
       exitTracked: false,
     };
     trackStudentEvent("question_viewed", {
       question_id: question.id,
+      question_type: question.questionType,
       practice_session_id: sessionRef.current ?? undefined,
       difficulty: question.difficulty,
       subtopic: question.subtopicName,
@@ -541,7 +547,15 @@ export function QuestionPlayer({
   }
 
   async function checkAnswer() {
-    if (!entry || !question || selected === null || record || submitting) return;
+    if (!entry || !question || !hasAnswer(selected) || record || submitting) return;
+    const answer = selected as string;
+    if (
+      question.questionType === "student_produced_response" &&
+      !isValidNumericAnswer(answer)
+    ) {
+      setFailure("Enter an integer, decimal, or fraction with a nonzero denominator.");
+      return;
+    }
     setSubmitting(true);
     setFailure(null);
 
@@ -552,7 +566,7 @@ export function QuestionPlayer({
 
     const result = await submitQuestionAttemptAction({
       questionId: answeredId,
-      choice: selected,
+      answer,
       sessionId,
     });
 
@@ -567,7 +581,7 @@ export function QuestionPlayer({
 
     setHistory((current) => ({
       ...current,
-      [answeredId]: { selected, verdict: result },
+      [answeredId]: { answer, verdict: result },
     }));
 
     const viewed = viewedQuestionRef.current;
@@ -580,7 +594,10 @@ export function QuestionPlayer({
       question_id: answeredId,
       practice_session_id: sessionId ?? undefined,
       correct: result.isCorrect,
-      selected_choice: selected,
+      ...(question.questionType === "multiple_choice"
+        ? { selected_choice: Number(answer) }
+        : {}),
+      question_type: question.questionType,
       answer_time_ms: answerTimeMs,
       used_desmos: desmosUsedIdsRef.current.has(answeredId),
       difficulty: question.difficulty,
@@ -596,6 +613,7 @@ export function QuestionPlayer({
     ) {
       trackStudentEvent("question_struggled", {
         question_id: answeredId,
+        question_type: question.questionType,
         practice_session_id: sessionId ?? undefined,
         correct: result.isCorrect,
         answer_time_ms: answerTimeMs,
@@ -605,6 +623,7 @@ export function QuestionPlayer({
     }
     trackStudentEvent("explanation_opened", {
       question_id: answeredId,
+      question_type: question.questionType,
       practice_session_id: sessionId ?? undefined,
       correct: result.isCorrect,
       source: "automatic_after_answer",
@@ -807,6 +826,7 @@ export function QuestionPlayer({
                   if (firstUse) {
                     trackStudentEvent("desmos_opened", {
                       question_id: question.id,
+                      question_type: question.questionType,
                       practice_session_id: sessionId ?? undefined,
                       source: "question_bank",
                     });
@@ -848,7 +868,7 @@ export function QuestionPlayer({
             Back
           </button>
 
-          {question && !record && selected !== null ? (
+          {question && !record && hasAnswer(selected) ? (
             <button
               type="button"
               onClick={checkAnswer}
@@ -975,7 +995,7 @@ export function QuestionPlayer({
         onToggleEliminating={() =>
           setEliminating((wasEliminating) => !wasEliminating)
         }
-        showEliminate={!record}
+        showEliminate={!record && question.questionType === "multiple_choice"}
         meta={
           <>
             {question.previousResult && !record && (
@@ -1009,17 +1029,19 @@ export function QuestionPlayer({
       />
 
       <div className="mt-6">
-        <ChoiceList
+        <QuestionAnswerInput
+          questionType={question.questionType}
           choices={question.choices}
-          selected={record ? record.selected : selected}
-          onSelect={(choice) =>
-            setSelections((current) => ({ ...current, [question.id]: choice }))
+          value={record ? record.answer : selected}
+          onChange={(answer) =>
+            setSelections((current) => ({ ...current, [question.id]: answer }))
           }
           crossed={flags.crossedFor(question.id)}
           onToggleCross={(choice) => flags.toggleCross(question.id, choice)}
           eliminating={eliminating}
           correctChoice={record ? record.verdict.correctChoice : null}
-          disabled={submitting}
+          isCorrect={record?.verdict.isCorrect}
+          disabled={submitting || Boolean(record)}
         />
       </div>
 
@@ -1073,7 +1095,14 @@ export function QuestionPlayer({
             >
               {record.verdict.isCorrect
                 ? "Correct!"
-                : `Not quite — the answer is ${CHOICE_LETTERS[record.verdict.correctChoice]}.`}
+                : record.verdict.questionType === "multiple_choice" &&
+                    record.verdict.correctChoice !== null
+                  ? `Not quite — the answer is ${CHOICE_LETTERS[record.verdict.correctChoice]}.`
+                  : `Not quite — accepted ${record.verdict.correctAnswers.join(" or ")}${
+                      record.verdict.correctAnswerTolerance
+                        ? ` (± ${record.verdict.correctAnswerTolerance})`
+                        : ""
+                    }.`}
             </p>
             <MathText
               as="p"

@@ -7,6 +7,12 @@ import { SolutionVideoSelector } from "@/components/admin/SolutionVideoSelector"
 import type { AdminVideoOption } from "@/lib/admin/types";
 import type { Domain, Subtopic } from "@/lib/learn/types";
 import {
+  QUESTION_TYPE_LABELS,
+  SPR_ANSWER_MODE_LABELS,
+  type QuestionType,
+  type SprAnswerMode,
+} from "@/lib/questions/answers";
+import {
   contentBlocksToLegacyPrompt,
   type QuestionContentBlock,
 } from "@/lib/questions/content";
@@ -21,7 +27,11 @@ export type QuestionDraft = {
   prompt: string;
   contentBlocks: QuestionContentBlock[];
   choices: string[];
-  correctChoice: number;
+  correctChoice: number | null;
+  questionType: QuestionType;
+  sprAnswerMode: SprAnswerMode | null;
+  sprAnswers: string[];
+  sprTolerance: string | null;
   explanation: string;
   difficulty: Difficulty;
   domainId: string;
@@ -163,89 +173,267 @@ export function QuestionFormFields({
 
       <FormSection
         title="Answers"
-        description="DecodedSAT currently uses four-choice multiple choice. Select the correct answer beside its text."
+        description="Choose multiple choice or a numeric SAT-style student-produced response."
         compact={compact}
         preview={
           compact ? undefined : (
-            <ol className="flex flex-col gap-2">
-              {CHOICE_LETTERS.map((letter, index) => (
-                <li
-                  key={letter}
-                  className={`flex gap-2 rounded-lg px-2 py-1.5 font-question text-base leading-7 ${
-                    value.correctChoice === index
-                      ? "bg-accent-chip text-accent"
-                      : "text-ink"
-                  }`}
-                >
-                  <span className="font-bold">{letter}</span>
-                  {value.choices[index]?.trim() ? (
-                    <MathText text={value.choices[index]} />
-                  ) : (
-                    <span className="italic text-muted">Choice {letter}</span>
-                  )}
-                </li>
-              ))}
-            </ol>
+            value.questionType === "multiple_choice" ? (
+              <ol className="flex flex-col gap-2">
+                {CHOICE_LETTERS.map((letter, index) => (
+                  <li
+                    key={letter}
+                    className={`flex gap-2 rounded-lg px-2 py-1.5 font-question text-base leading-7 ${
+                      value.correctChoice === index
+                        ? "bg-accent-chip text-accent"
+                        : "text-ink"
+                    }`}
+                  >
+                    <span className="font-bold">{letter}</span>
+                    {value.choices[index]?.trim() ? (
+                      <MathText text={value.choices[index]} />
+                    ) : (
+                      <span className="italic text-muted">Choice {letter}</span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <div className="rounded-xl border border-hairline bg-surface p-3">
+                <p className="text-xs font-semibold text-muted">
+                  {value.sprAnswerMode
+                    ? SPR_ANSWER_MODE_LABELS[value.sprAnswerMode]
+                    : "Exact"}
+                </p>
+                <p className="mt-1 font-question text-lg text-ink">
+                  {value.sprAnswers.filter((answer) => answer.trim()).join(" or ") ||
+                    "Correct numeric answer"}
+                </p>
+                {value.sprAnswerMode === "tolerance" && value.sprTolerance && (
+                  <p className="mt-1 text-sm text-muted">
+                    Tolerance: ±{value.sprTolerance}
+                  </p>
+                )}
+              </div>
+            )
           )
         }
       >
-        <fieldset
-          aria-describedby={errors.choices ? `${idPrefix}-choices-error` : undefined}
-          className="grid gap-2 sm:grid-cols-2"
-        >
-          <legend className={compact ? "mb-1 text-sm font-medium text-muted" : "sr-only"}>
-            Choices (select the correct one)
-          </legend>
-          {CHOICE_LETTERS.map((letter, index) => {
-            const error = errors[`choices.${index}`];
-            return (
-              <label
-                key={letter}
-                className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-[0.9375rem] text-ink"
+        <label className="flex flex-col gap-1 text-sm font-medium text-muted">
+          Question type
+          <select
+            value={value.questionType}
+            onChange={(event) => {
+              const questionType = event.target.value as QuestionType;
+              onChange({
+                ...value,
+                questionType,
+                choices:
+                  questionType === "multiple_choice"
+                    ? value.choices.length === 4
+                      ? value.choices
+                      : ["", "", "", ""]
+                    : [],
+                correctChoice:
+                  questionType === "multiple_choice"
+                    ? value.correctChoice ?? -1
+                    : null,
+                sprAnswerMode:
+                  questionType === "student_produced_response"
+                    ? value.sprAnswerMode ?? "exact"
+                    : null,
+                sprAnswers:
+                  questionType === "student_produced_response"
+                    ? value.sprAnswers.length > 0
+                      ? value.sprAnswers
+                      : [""]
+                    : [],
+                sprTolerance:
+                  questionType === "student_produced_response" &&
+                  value.sprAnswerMode === "tolerance"
+                    ? value.sprTolerance ?? ""
+                    : null,
+              });
+            }}
+            className={FIELD_CLASS}
+          >
+            {Object.entries(QUESTION_TYPE_LABELS).map(([type, label]) => (
+              <option key={type} value={type}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {value.questionType === "multiple_choice" ? (
+          <>
+            <fieldset
+              aria-describedby={errors.choices ? `${idPrefix}-choices-error` : undefined}
+              className="grid gap-2 sm:grid-cols-2"
+            >
+              <legend className={compact ? "mb-1 text-sm font-medium text-muted" : "sr-only"}>
+                Choices (select the correct one)
+              </legend>
+              {CHOICE_LETTERS.map((letter, index) => {
+                const error = errors[`choices.${index}`];
+                return (
+                  <label
+                    key={letter}
+                    className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-[0.9375rem] text-ink"
+                  >
+                    <input
+                      type="radio"
+                      name={`${idPrefix}-correct`}
+                      checked={value.correctChoice === index}
+                      onChange={() => update("correctChoice", index)}
+                      aria-label={`Mark ${letter} as correct`}
+                      aria-describedby={errors.correctChoice ? `${idPrefix}-correct-choice-error` : undefined}
+                      className="accent-accent"
+                    />
+                    <span className="w-4 text-sm font-bold text-muted">{letter}</span>
+                    <input
+                      type="text"
+                      value={value.choices[index] ?? ""}
+                      maxLength={1000}
+                      required
+                      aria-invalid={Boolean(error)}
+                      aria-describedby={error ? `${idPrefix}-choice-${index}-error` : undefined}
+                      placeholder={`Choice ${letter}`}
+                      onChange={(event) => {
+                        const choices = [...value.choices];
+                        choices[index] = event.target.value;
+                        update("choices", choices);
+                      }}
+                      className={`${FIELD_CLASS} w-full`}
+                    />
+                    <span className="col-span-2" />
+                    <FieldError id={`${idPrefix}-choice-${index}-error`}>
+                      {error}
+                    </FieldError>
+                  </label>
+                );
+              })}
+            </fieldset>
+            <FieldError id={`${idPrefix}-choices-error`}>{errors.choices}</FieldError>
+            <FieldError id={`${idPrefix}-correct-choice-error`}>
+              {errors.correctChoice}
+            </FieldError>
+          </>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1 text-sm font-medium text-muted">
+              Answer mode
+              <select
+                value={value.sprAnswerMode ?? "exact"}
+                onChange={(event) => {
+                  const sprAnswerMode = event.target.value as SprAnswerMode;
+                  onChange({
+                    ...value,
+                    sprAnswerMode,
+                    sprAnswers:
+                      sprAnswerMode === "multiple"
+                        ? value.sprAnswers.length >= 2
+                          ? value.sprAnswers
+                          : [value.sprAnswers[0] ?? "", ""]
+                        : [value.sprAnswers[0] ?? ""],
+                    sprTolerance:
+                      sprAnswerMode === "tolerance"
+                        ? value.sprTolerance ?? ""
+                        : null,
+                  });
+                }}
+                className={FIELD_CLASS}
               >
-                <input
-                  type="radio"
-                  name={`${idPrefix}-correct`}
-                  checked={value.correctChoice === index}
-                  onChange={() => update("correctChoice", index)}
-                  aria-label={`Mark ${letter} as correct`}
-                  aria-describedby={
-                    errors.correctChoice
-                      ? `${idPrefix}-correct-choice-error`
-                      : undefined
-                  }
-                  className="accent-accent"
-                />
-                <span className="w-4 text-sm font-bold text-muted">{letter}</span>
-                <input
-                  type="text"
-                  value={value.choices[index] ?? ""}
-                  maxLength={1000}
-                  required
-                  aria-invalid={Boolean(error)}
-                  aria-describedby={error ? `${idPrefix}-choice-${index}-error` : undefined}
-                  placeholder={`Choice ${letter}`}
-                  onChange={(event) => {
-                    const choices = [...value.choices];
-                    choices[index] = event.target.value;
-                    update("choices", choices);
-                  }}
-                  className={`${FIELD_CLASS} w-full`}
-                />
-                <span className="col-span-2" />
-                <FieldError id={`${idPrefix}-choice-${index}-error`}>
-                  {error}
+                {Object.entries(SPR_ANSWER_MODE_LABELS).map(([mode, label]) => (
+                  <option key={mode} value={mode}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {value.sprAnswers.map((answer, index) => (
+              <label
+                key={index}
+                className="flex flex-col gap-1 text-sm font-medium text-muted"
+              >
+                {value.sprAnswerMode === "multiple"
+                  ? `Accepted value ${index + 1}`
+                  : "Correct numeric value"}
+                <span className="flex gap-2">
+                  <input
+                    type="text"
+                    inputMode="text"
+                    value={answer}
+                    maxLength={100}
+                    required
+                    placeholder="e.g. 3.5 or 7/2"
+                    onChange={(event) => {
+                      const sprAnswers = [...value.sprAnswers];
+                      sprAnswers[index] = event.target.value;
+                      update("sprAnswers", sprAnswers);
+                    }}
+                    aria-invalid={Boolean(errors[`sprAnswers.${index}`])}
+                    className={`${FIELD_CLASS} min-w-0 flex-1 font-mono`}
+                  />
+                  {value.sprAnswerMode === "multiple" && value.sprAnswers.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        update(
+                          "sprAnswers",
+                          value.sprAnswers.filter((_, itemIndex) => itemIndex !== index),
+                        )
+                      }
+                      className="rounded-xl border border-hairline px-3 text-sm font-semibold text-muted hover:bg-background"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
+                <FieldError id={`${idPrefix}-spr-answer-${index}-error`}>
+                  {errors[`sprAnswers.${index}`]}
                 </FieldError>
               </label>
-            );
-          })}
-        </fieldset>
-        <FieldError id={`${idPrefix}-choices-error`}>
-          {errors.choices}
-        </FieldError>
-        <FieldError id={`${idPrefix}-correct-choice-error`}>
-          {errors.correctChoice}
-        </FieldError>
+            ))}
+            <FieldError id={`${idPrefix}-spr-answers-error`}>
+              {errors.sprAnswers}
+            </FieldError>
+
+            {value.sprAnswerMode === "multiple" && value.sprAnswers.length < 10 && (
+              <button
+                type="button"
+                onClick={() => update("sprAnswers", [...value.sprAnswers, ""])}
+                className="self-start rounded-xl border border-hairline px-3 py-2 text-sm font-semibold text-ink hover:bg-background"
+              >
+                Add accepted value
+              </button>
+            )}
+
+            {value.sprAnswerMode === "tolerance" && (
+              <label className="flex flex-col gap-1 text-sm font-medium text-muted">
+                Tolerance
+                <input
+                  type="text"
+                  inputMode="text"
+                  value={value.sprTolerance ?? ""}
+                  maxLength={100}
+                  required
+                  placeholder="e.g. 0.005"
+                  onChange={(event) => update("sprTolerance", event.target.value)}
+                  aria-invalid={Boolean(errors.sprTolerance)}
+                  className={`${FIELD_CLASS} font-mono`}
+                />
+                <span className="text-xs font-normal leading-relaxed">
+                  Answers are correct when their exact numeric distance from the
+                  correct value is no greater than this amount.
+                </span>
+                <FieldError id={`${idPrefix}-spr-tolerance-error`}>
+                  {errors.sprTolerance}
+                </FieldError>
+              </label>
+            )}
+          </div>
+        )}
       </FormSection>
 
       <FormSection
